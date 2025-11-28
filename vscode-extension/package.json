@@ -1,0 +1,153 @@
+{
+  "name": "chainlens",
+  "displayName": "ChainLens - Smart Contract Intelligence",
+  "description": "Real-time security analysis, gas estimation, and debugging for Solidity smart contracts",
+  "version": "0.1.0",
+  "publisher": "chainlens",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chainlens/vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "solidity",
+    "ethereum",
+    "smart contracts",
+    "security",
+    "blockchain",
+    "web3",
+    "defi"
+  ],
+  "activationEvents": [
+    "onLanguage:solidity",
+    "workspaceContains:**/*.sol"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "solidity",
+        "extensions": [".sol"],
+        "aliases": ["Solidity", "solidity"]
+      }
+    ],
+    "commands": [
+      {
+        "command": "chainlens.analyzeFile",
+        "title": "ChainLens: Analyze Current File"
+      },
+      {
+        "command": "chainlens.analyzeWorkspace",
+        "title": "ChainLens: Analyze Workspace"
+      },
+      {
+        "command": "chainlens.showGasReport",
+        "title": "ChainLens: Show Gas Report"
+      },
+      {
+        "command": "chainlens.showSecurityReport",
+        "title": "ChainLens: Show Security Report"
+      },
+      {
+        "command": "chainlens.traceTransaction",
+        "title": "ChainLens: Trace Transaction"
+      }
+    ],
+    "configuration": {
+      "title": "ChainLens",
+      "properties": {
+        "chainlens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable ChainLens analysis"
+        },
+        "chainlens.analyzeOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically analyze files on save"
+        },
+        "chainlens.securityLevel": {
+          "type": "string",
+          "enum": ["info", "warning", "error"],
+          "default": "warning",
+          "description": "Minimum severity level to display"
+        },
+        "chainlens.showGasEstimates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline gas estimates"
+        },
+        "chainlens.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "ChainLens API key for cloud features"
+        },
+        "chainlens.rpcUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Custom RPC URL for transaction tracing"
+        }
+      }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "chainlensContracts",
+          "name": "ChainLens Contracts",
+          "when": "chainlens.enabled"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "chainlens",
+          "title": "ChainLens",
+          "icon": "images/chainlens-icon.svg"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "chainlens.analyzeFile",
+          "when": "resourceLangId == solidity",
+          "group": "chainlens"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.0",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "dependencies": {
+    "@solidity-parser/parser": "^0.18.0",
+    "axios": "^1.6.0"
+  }
+}
