@@ -717,7 +717,7 @@ func (m *PatientMatcher) LinkPatients(masterID, duplicateID string) (*PatientLin
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	master, ok := m.patients[masterID]
+	_, ok := m.patients[masterID]
 	if !ok {
 		return nil, fmt.Errorf("master patient not found: %s", masterID)
 	}

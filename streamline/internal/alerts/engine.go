@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/streamline/streamline/internal/connectors"
+	"github.com/savegress/streamline/internal/connectors"
 )
 
 // Engine manages alert rules, evaluates conditions, and dispatches notifications
@@ -832,10 +832,10 @@ func (e *Engine) EvaluateConnectorStatus(connector connectors.Connector, err err
 		Type:        AlertTypeChannelDown,
 		Severity:    SeverityCritical,
 		Status:      AlertStatusOpen,
-		Title:       fmt.Sprintf("Channel Down: %s", connector.Name()),
-		Message:     fmt.Sprintf("Failed to connect to %s channel: %s", connector.Type(), err.Error()),
-		ChannelID:   connector.Type(),
-		ChannelName: connector.Name(),
+		Title:       fmt.Sprintf("Channel Down: %s", connector.GetName()),
+		Message:     fmt.Sprintf("Failed to connect to %s channel: %s", connector.GetType(), err.Error()),
+		ChannelID:   string(connector.GetType()),
+		ChannelName: connector.GetName(),
 		Data: map[string]interface{}{
 			"error": err.Error(),
 		},

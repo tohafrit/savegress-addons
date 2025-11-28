@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/streamline/streamline/internal/connectors"
+	"github.com/savegress/streamline/internal/connectors"
 )
 
 // Config holds WooCommerce API configuration
@@ -187,8 +187,8 @@ func (c *Connector) GetProducts(ctx context.Context, params connectors.ProductPa
 	if params.SKU != "" {
 		queryParams.Set("sku", params.SKU)
 	}
-	if !params.UpdatedAfter.IsZero() {
-		queryParams.Set("modified_after", params.UpdatedAfter.Format(time.RFC3339))
+	if params.UpdatedAfter != "" {
+		queryParams.Set("modified_after", params.UpdatedAfter)
 	}
 
 	if len(queryParams) > 0 {
@@ -387,7 +387,7 @@ func (c *Connector) GetInventory(ctx context.Context, productID string) (*connec
 		Available:   quantity,
 		ChannelID:   "woocommerce",
 		LocationID:  "default",
-		LastUpdated: time.Now(),
+		LastUpdated: time.Now().Format(time.RFC3339),
 	}, nil
 }
 
@@ -454,8 +454,8 @@ func (c *Connector) GetOrders(ctx context.Context, params connectors.OrderParams
 		page := (params.Offset / params.Limit) + 1
 		queryParams.Set("page", strconv.Itoa(page))
 	}
-	if !params.CreatedAfter.IsZero() {
-		queryParams.Set("after", params.CreatedAfter.Format(time.RFC3339))
+	if params.CreatedAfter != "" {
+		queryParams.Set("after", params.CreatedAfter)
 	}
 	if params.Status != "" {
 		queryParams.Set("status", params.Status)
@@ -553,43 +553,46 @@ func (c *Connector) GetOrders(ctx context.Context, params connectors.OrderParams
 			shippingMethod = o.ShippingLines[0].MethodTitle
 		}
 
+		billingAddr := &connectors.Address{
+			Name:        o.Billing.FirstName + " " + o.Billing.LastName,
+			Line1:       o.Billing.Address1,
+			Line2:       o.Billing.Address2,
+			City:        o.Billing.City,
+			State:       o.Billing.State,
+			PostalCode:  o.Billing.Postcode,
+			CountryCode: o.Billing.Country,
+			Phone:       o.Billing.Phone,
+			Email:       o.Billing.Email,
+		}
+		shippingAddr := &connectors.Address{
+			Name:        o.Shipping.FirstName + " " + o.Shipping.LastName,
+			Line1:       o.Shipping.Address1,
+			Line2:       o.Shipping.Address2,
+			City:        o.Shipping.City,
+			State:       o.Shipping.State,
+			PostalCode:  o.Shipping.Postcode,
+			CountryCode: o.Shipping.Country,
+		}
+
 		orders = append(orders, &connectors.Order{
-			ID:             strconv.Itoa(o.ID),
-			ChannelOrderID: o.OrderKey,
-			ChannelID:      "woocommerce",
-			Status:         c.mapOrderStatus(o.Status),
-			PaymentStatus:  c.mapPaymentStatus(o.Status),
-			Total:          total,
-			Tax:            tax,
-			Shipping:       shipping,
-			Discount:       discount,
-			Currency:       o.Currency,
-			Items:          items,
-			BillingAddress: connectors.Address{
-				Name:        o.Billing.FirstName + " " + o.Billing.LastName,
-				Line1:       o.Billing.Address1,
-				Line2:       o.Billing.Address2,
-				City:        o.Billing.City,
-				State:       o.Billing.State,
-				PostalCode:  o.Billing.Postcode,
-				CountryCode: o.Billing.Country,
-				Phone:       o.Billing.Phone,
-				Email:       o.Billing.Email,
-			},
-			ShippingAddress: connectors.Address{
-				Name:        o.Shipping.FirstName + " " + o.Shipping.LastName,
-				Line1:       o.Shipping.Address1,
-				Line2:       o.Shipping.Address2,
-				City:        o.Shipping.City,
-				State:       o.Shipping.State,
-				PostalCode:  o.Shipping.Postcode,
-				CountryCode: o.Shipping.Country,
-			},
-			ShippingMethod: shippingMethod,
-			CustomerID:     strconv.Itoa(o.CustomerID),
-			CustomerNote:   o.CustomerNote,
-			CreatedAt:      createdAt,
-			UpdatedAt:      updatedAt,
+			ID:              strconv.Itoa(o.ID),
+			ChannelOrderID:  o.OrderKey,
+			ChannelID:       "woocommerce",
+			Status:          c.mapOrderStatus(o.Status),
+			PaymentStatus:   c.mapPaymentStatus(o.Status),
+			Total:           total,
+			Tax:             tax,
+			Shipping:        shipping,
+			Discount:        discount,
+			Currency:        o.Currency,
+			Items:           items,
+			BillingAddress:  billingAddr,
+			ShippingAddress: shippingAddr,
+			ShippingMethod:  shippingMethod,
+			CustomerID:      strconv.Itoa(o.CustomerID),
+			CustomerNote:    o.CustomerNote,
+			CreatedAt:       createdAt.Format(time.RFC3339),
+			UpdatedAt:       updatedAt.Format(time.RFC3339),
 		})
 	}
 

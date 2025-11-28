@@ -9,9 +9,14 @@ import (
 // Product represents a product in the catalog
 type Product struct {
 	ID          string            `json:"id"`
+	ExternalID  string            `json:"external_id,omitempty"` // ID in external channel (e.g., ASIN for Amazon)
 	SKU         string            `json:"sku"`
 	Name        string            `json:"name"`
+	Title       string            `json:"title,omitempty"`       // Product title (for channels like Amazon)
 	Description string            `json:"description,omitempty"`
+	ProductType string            `json:"product_type,omitempty"` // Product type/category
+	Channel     ChannelType       `json:"channel,omitempty"`      // Source channel
+	ChannelID   string            `json:"channel_id,omitempty"`   // ID of the channel
 	BasePrice   decimal.Decimal   `json:"base_price"`
 	Cost        decimal.Decimal   `json:"cost"`
 	Weight      float64           `json:"weight,omitempty"`
@@ -99,34 +104,42 @@ const (
 
 // Order represents a sales order
 type Order struct {
-	ID           string        `json:"id"`
-	Channel      string        `json:"channel"`
-	ChannelRef   string        `json:"channel_ref"` // order ID in the channel
-	Status       OrderStatus   `json:"status"`
-	Items        []OrderItem   `json:"items"`
-	Customer     Customer      `json:"customer"`
-	Shipping     ShippingInfo  `json:"shipping"`
-	Billing      *BillingInfo  `json:"billing,omitempty"`
-	Totals       OrderTotals   `json:"totals"`
-	WarehouseID  string        `json:"warehouse_id,omitempty"`
-	Fulfillment  *Fulfillment  `json:"fulfillment,omitempty"`
-	Notes        string        `json:"notes,omitempty"`
-	Tags         []string      `json:"tags,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
+	ID              string                 `json:"id"`
+	ExternalID      string                 `json:"external_id,omitempty"` // order ID in the channel
+	Channel         ChannelType            `json:"channel"`
+	ChannelID       string                 `json:"channel_id,omitempty"`
+	ChannelRef      string                 `json:"channel_ref,omitempty"` // legacy field
+	Status          OrderStatus            `json:"status"`
+	Total           decimal.Decimal        `json:"total,omitempty"`    // simplified total field
+	Currency        string                 `json:"currency,omitempty"` // currency code
+	Items           []OrderItem            `json:"items"`
+	Customer        Customer               `json:"customer"`
+	Shipping        ShippingInfo           `json:"shipping"`
+	ShippingAddress Address                `json:"shipping_address,omitempty"` // direct address field
+	Billing         *BillingInfo           `json:"billing,omitempty"`
+	Totals          OrderTotals            `json:"totals"`
+	WarehouseID     string                 `json:"warehouse_id,omitempty"`
+	Fulfillment     *Fulfillment           `json:"fulfillment,omitempty"`
+	Notes           string                 `json:"notes,omitempty"`
+	Tags            []string               `json:"tags,omitempty"`
+	Metadata        map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
 }
 
 type OrderStatus string
 
 const (
-	OrderStatusPending    OrderStatus = "pending"
-	OrderStatusProcessing OrderStatus = "processing"
-	OrderStatusShipped    OrderStatus = "shipped"
-	OrderStatusDelivered  OrderStatus = "delivered"
-	OrderStatusCancelled  OrderStatus = "cancelled"
-	OrderStatusRefunded   OrderStatus = "refunded"
-	OrderStatusOnHold     OrderStatus = "on_hold"
+	OrderStatusPending          OrderStatus = "pending"
+	OrderStatusProcessing       OrderStatus = "processing"
+	OrderStatusShipped          OrderStatus = "shipped"
+	OrderStatusPartiallyShipped OrderStatus = "partially_shipped"
+	OrderStatusDelivered        OrderStatus = "delivered"
+	OrderStatusCancelled        OrderStatus = "cancelled"
+	OrderStatusCanceled         OrderStatus = "canceled" // alternate spelling
+	OrderStatusRefunded         OrderStatus = "refunded"
+	OrderStatusOnHold           OrderStatus = "on_hold"
+	OrderStatusFailed           OrderStatus = "failed"
 )
 
 type OrderItem struct {
@@ -162,12 +175,14 @@ type BillingInfo struct {
 }
 
 type Address struct {
+	Name       string `json:"name,omitempty"`
 	Line1      string `json:"line1"`
 	Line2      string `json:"line2,omitempty"`
 	City       string `json:"city"`
 	State      string `json:"state"`
 	PostalCode string `json:"postal_code"`
 	Country    string `json:"country"`
+	Phone      string `json:"phone,omitempty"`
 }
 
 type OrderTotals struct {

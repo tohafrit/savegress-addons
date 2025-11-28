@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/streamline/streamline/internal/connectors"
+	"github.com/savegress/streamline/internal/connectors"
 )
 
 // Config holds eBay API configuration
@@ -367,7 +367,7 @@ func (c *Connector) GetInventory(ctx context.Context, productID string) (*connec
 		Available:   item.Availability.ShipToLocationAvailability.Quantity,
 		ChannelID:   "ebay",
 		LocationID:  c.config.MarketplaceID,
-		LastUpdated: time.Now(),
+		LastUpdated: time.Now().Format(time.RFC3339),
 	}, nil
 }
 
@@ -427,8 +427,8 @@ func (c *Connector) GetOrders(ctx context.Context, params connectors.OrderParams
 	path := "/sell/fulfillment/v1/order"
 
 	queryParams := url.Values{}
-	if !params.CreatedAfter.IsZero() {
-		queryParams.Set("filter", fmt.Sprintf("creationdate:[%s..]", params.CreatedAfter.Format(time.RFC3339)))
+	if params.CreatedAfter != "" {
+		queryParams.Set("filter", fmt.Sprintf("creationdate:[%s..]", params.CreatedAfter))
 	}
 	if params.Limit > 0 {
 		queryParams.Set("limit", strconv.Itoa(params.Limit))
@@ -545,9 +545,9 @@ func (c *Connector) GetOrders(ctx context.Context, params connectors.OrderParams
 			Total:           total,
 			Currency:        o.PricingSummary.Total.Currency,
 			Items:           items,
-			ShippingAddress: shippingAddress,
+			ShippingAddress: &shippingAddress,
 			CustomerID:      o.Buyer.Username,
-			CreatedAt:       createdAt,
+			CreatedAt:       createdAt.Format(time.RFC3339),
 		})
 	}
 
@@ -633,7 +633,7 @@ func (c *Connector) GetOrder(ctx context.Context, orderID string) (*connectors.O
 		Currency:       o.PricingSummary.Total.Currency,
 		Items:          items,
 		CustomerID:     o.Buyer.Username,
-		CreatedAt:      createdAt,
+		CreatedAt:      createdAt.Format(time.RFC3339),
 	}, nil
 }
 
@@ -694,7 +694,7 @@ func (c *Connector) GetPrice(ctx context.Context, productID string) (*connectors
 		ListPrice:   listPrice,
 		Currency:    offer.PricingSummary.Price.Currency,
 		ChannelID:   "ebay",
-		LastUpdated: time.Now(),
+		LastUpdated: time.Now().Format(time.RFC3339),
 	}, nil
 }
 

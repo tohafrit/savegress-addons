@@ -110,7 +110,7 @@ func (f OrderFilter) matches(order *models.Order) bool {
 	if f.Status != "" && order.Status != f.Status {
 		return false
 	}
-	if f.Channel != "" && order.Channel != f.Channel {
+	if f.Channel != "" && string(order.Channel) != f.Channel {
 		return false
 	}
 	if f.Warehouse != "" && order.WarehouseID != f.Warehouse {
@@ -290,7 +290,7 @@ func (p *Processor) GetStats() *OrderStats {
 
 	for _, order := range p.orders {
 		stats.ByStatus[string(order.Status)]++
-		stats.ByChannel[order.Channel]++
+		stats.ByChannel[string(order.Channel)]++
 
 		if order.CreatedAt.After(today) {
 			stats.TodayCount++
