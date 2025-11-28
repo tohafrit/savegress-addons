@@ -1,0 +1,85 @@
+server:
+  port: 3005
+  environment: ${ENVIRONMENT:-production}
+  jwt_secret: ${JWT_SECRET}
+
+database:
+  url: ${DATABASE_URL:-postgres://healthsync:healthsync@postgres:5432/healthsync}
+  max_conns: 25
+  min_conns: 5
+
+redis:
+  url: ${REDIS_URL:-redis://redis:6379}
+
+fhir:
+  version: R4
+  supported_resources:
+    - Patient
+    - Practitioner
+    - Organization
+    - Encounter
+    - Observation
+    - Condition
+    - Medication
+    - MedicationRequest
+    - Procedure
+    - DiagnosticReport
+    - Immunization
+    - AllergyIntolerance
+  validation_enabled: true
+  profile_url: http://hl7.org/fhir/us/core
+
+compliance:
+  hipaa_enabled: true
+  minimum_necessary: true
+  breach_notification: true
+  retention_period: 52560h # 6 years
+  phi_categories:
+    - name
+    - address
+    - dates
+    - phone
+    - email
+    - ssn
+    - medical_record_number
+    - health_plan_beneficiary
+    - photo
+
+audit:
+  enabled: true
+  retention_days: 2190 # 6 years
+  detail_level: full
+  realtime_alerts: true
+  storage_backend: database
+
+consent:
+  required: true
+  default_policy: deny
+  allowed_purposes:
+    - treatment
+    - payment
+    - operations
+    - research
+    - public_health
+    - emergency
+  expiration_days: 365
+  granularity_level: resource
+
+encryption:
+  at_rest_enabled: true
+  in_transit_enabled: true
+  algorithm: AES-256-GCM
+  key_rotation_days: 90
+
+alerts:
+  channels:
+    slack:
+      webhook_url: ${SLACK_WEBHOOK_URL}
+      channel: "#hipaa-alerts"
+    email:
+      smtp_host: ${SMTP_HOST}
+      smtp_port: 587
+      from: alerts@healthsync.local
+      recipients:
+        - compliance@company.com
+        - security@company.com

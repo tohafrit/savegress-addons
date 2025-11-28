@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  iotsense:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "3006:3006"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgres://iotsense:iotsense@postgres:5432/iotsense
+      - REDIS_URL=redis://redis:6379
+      - STORAGE_TYPE=memory
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - iotsense-network
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: iotsense
+      POSTGRES_PASSWORD: iotsense
+      POSTGRES_DB: iotsense
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iotsense"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iotsense-network
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iotsense-network
+
+  # Optional: TimescaleDB for production time-series storage
+  # timescaledb:
+  #   image: timescale/timescaledb:latest-pg16
+  #   environment:
+  #     POSTGRES_USER: iotsense
+  #     POSTGRES_PASSWORD: iotsense
+  #     POSTGRES_DB: iotsense
+  #   volumes:
+  #     - timescale_data:/var/lib/postgresql/data
+  #   networks:
+  #     - iotsense-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  # timescale_data:
+
+networks:
+  iotsense-network:
+    driver: bridge

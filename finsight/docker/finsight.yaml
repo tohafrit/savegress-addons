@@ -1,0 +1,75 @@
+server:
+  port: 3004
+  environment: ${ENVIRONMENT:-production}
+  jwt_secret: ${JWT_SECRET}
+
+database:
+  url: ${DATABASE_URL:-postgres://finsight:finsight@postgres:5432/finsight}
+  max_conns: 25
+  min_conns: 5
+
+redis:
+  url: ${REDIS_URL:-redis://redis:6379}
+
+transactions:
+  batch_size: 1000
+  process_interval: 5s
+  retention_days: 365
+  categorization_enabled: true
+
+fraud:
+  enabled: true
+  realtime_scoring: true
+  score_threshold: 0.7
+  velocity_window: 1h
+  max_daily_amount: 10000
+  max_single_amount: 5000
+  geofencing_enabled: true
+
+reconciliation:
+  auto_reconcile: true
+  match_tolerance: 0.01
+  date_tolerance: 24h
+  batch_size: 5000
+  schedule_cron: "0 2 * * *"
+
+reporting:
+  enabled: true
+  storage_path: /var/lib/finsight/reports
+  retention_days: 90
+  default_formats:
+    - pdf
+    - csv
+    - xlsx
+  scheduled_reports:
+    - name: Daily Transaction Summary
+      type: transaction
+      period: daily
+      schedule: "0 6 * * *"
+      format: pdf
+      recipients:
+        - finance@company.com
+
+compliance:
+  aml_enabled: true
+  kyc_required: true
+  sar_threshold: 5000
+  ctr_threshold: 10000
+  watchlist_enabled: true
+  audit_log_retention: 730
+
+alerts:
+  channels:
+    slack:
+      webhook_url: ${SLACK_WEBHOOK_URL}
+      channel: "#fraud-alerts"
+    email:
+      smtp_host: ${SMTP_HOST}
+      smtp_port: 587
+      from: alerts@finsight.local
+      recipients:
+        - compliance@company.com
+        - fraud@company.com
+    pagerduty:
+      service_key: ${PAGERDUTY_KEY}
+      enabled: ${PAGERDUTY_ENABLED:-false}

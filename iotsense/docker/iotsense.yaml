@@ -1,0 +1,49 @@
+server:
+  port: 3006
+  environment: ${ENVIRONMENT:-production}
+  jwt_secret: ${JWT_SECRET:-}
+
+database:
+  url: ${DATABASE_URL:-postgres://iotsense:iotsense@postgres:5432/iotsense}
+  max_conns: 25
+  min_conns: 5
+
+redis:
+  url: ${REDIS_URL:-redis://redis:6379}
+
+telemetry:
+  batch_size: 1000
+  flush_interval: 5s
+  buffer_size: 100000
+  max_data_age: 24h
+  compression_enabled: true
+  validation_enabled: true
+
+devices:
+  heartbeat_interval: 30s
+  offline_threshold: 5m
+  max_devices: 10000
+  auto_discovery: true
+
+alerts:
+  enabled: true
+  evaluation_interval: 10s
+  retention_days: 90
+  max_active_alerts: 1000
+  channels:
+    slack:
+      webhook_url: ${SLACK_WEBHOOK_URL:-}
+      channel: "#iot-alerts"
+    email:
+      smtp_host: ${SMTP_HOST:-}
+      smtp_port: ${SMTP_PORT:-587}
+      from: ${ALERT_EMAIL_FROM:-alerts@iotsense.local}
+      recipients: []
+    webhook:
+      url: ${ALERT_WEBHOOK_URL:-}
+      headers: {}
+
+storage:
+  type: ${STORAGE_TYPE:-memory}
+  retention_period: 168h  # 7 days
+  downsample_after: 24h
