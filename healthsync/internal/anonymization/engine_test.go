@@ -561,3 +561,145 @@ func TestKAnonymityResult_Struct(t *testing.T) {
 		t.Error("ViolatingGroups not set")
 	}
 }
+
+func TestEngine_AnonymizeReference(t *testing.T) {
+	cfg := &Config{Method: "safe_harbor", Salt: "test-salt", DateShiftRange: 30}
+	e := NewEngine(cfg)
+
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"patient reference", "Patient/patient-123"},
+		{"observation reference", "Observation/obs-456"},
+		{"simple ID", "simple-id-789"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := e.anonymizeReference(tt.input)
+			if result == tt.input {
+				t.Error("reference should be anonymized")
+			}
+		})
+	}
+}
+
+func TestEngine_AnonymizeJSON_WithNested(t *testing.T) {
+	cfg := &Config{
+		Method:            "safe_harbor",
+		DateShiftRange:    30,
+		ZipCodeTruncation: 3,
+		Salt:              "test-salt",
+	}
+	e := NewEngine(cfg)
+
+	input := map[string]interface{}{
+		"id": "resource-123",
+		"name": []map[string]interface{}{
+			{"family": "Doe", "given": []string{"John"}},
+		},
+		"telecom": []map[string]interface{}{
+			{"value": "555-1234"},
+		},
+		"address": []interface{}{
+			map[string]interface{}{
+				"line":       []string{"123 Main St"},
+				"city":       "Boston",
+				"postalCode": "02101",
+			},
+		},
+		"birthDate": "1980-01-15",
+		"contact": []map[string]interface{}{
+			{"name": "Emergency Contact"},
+		},
+		"identifier": []map[string]interface{}{
+			{"value": "MRN12345"},
+		},
+		"nested": map[string]interface{}{
+			"name": []map[string]interface{}{{"family": "NestedDoe"}},
+		},
+	}
+	jsonData, _ := json.Marshal(input)
+
+	result, err := e.AnonymizeJSON(jsonData, models.ResourceTypePatient, "patient-123")
+	if err != nil {
+		t.Fatalf("AnonymizeJSON failed: %v", err)
+	}
+
+	var output map[string]interface{}
+	json.Unmarshal(result, &output)
+
+	// name should be removed
+	if _, ok := output["name"]; ok {
+		t.Error("name should be removed")
+	}
+
+	// telecom should be removed
+	if _, ok := output["telecom"]; ok {
+		t.Error("telecom should be removed")
+	}
+
+	// contact should be removed
+	if _, ok := output["contact"]; ok {
+		t.Error("contact should be removed")
+	}
+
+	// identifier should be removed (Safe Harbor)
+	if _, ok := output["identifier"]; ok {
+		t.Error("identifier should be removed for Safe Harbor")
+	}
+
+	// ID should be pseudonymized
+	if output["id"] == "resource-123" {
+		t.Error("ID should be pseudonymized")
+	}
+
+	// address should be truncated
+	if addr, ok := output["address"].([]interface{}); ok && len(addr) > 0 {
+		if addrMap, ok := addr[0].(map[string]interface{}); ok {
+			// line should be removed
+			if _, ok := addrMap["line"]; ok {
+				t.Error("address line should be removed")
+			}
+			// postal code should be truncated
+			if pc, ok := addrMap["postalCode"].(string); ok {
+				if !strings.HasSuffix(pc, "00") {
+					t.Errorf("postal code should be truncated, got %s", pc)
+				}
+			}
+		}
+	}
+
+	// nested structures should be processed
+	if nested, ok := output["nested"].(map[string]interface{}); ok {
+		if _, ok := nested["name"]; ok {
+			t.Error("nested name should be removed")
+		}
+	}
+}
+
+func TestEngine_AnonymizeIdentifiers(t *testing.T) {
+	cfg := &Config{
+		Method:         "limited_dataset", // Limited dataset keeps some identifiers
+		DateShiftRange: 30,
+		Salt:           "test-salt",
+	}
+	e := NewEngine(cfg)
+
+	patient := &models.Patient{
+		FHIRResource: models.FHIRResource{
+			ID: "patient-123",
+			Identifier: []models.Identifier{
+				{Value: "MRN12345", System: "http://hospital.org/mrn"},
+			},
+		},
+	}
+
+	anonymized := e.AnonymizePatient(patient)
+
+	// ID should be pseudonymized
+	if anonymized.ID == "patient-123" {
+		t.Error("ID should be pseudonymized")
+	}
+}

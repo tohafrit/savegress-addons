@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/savegress/streamline/pkg/models"
+	"github.com/shopspring/decimal"
 )
 
 func TestNewProcessor(t *testing.T) {
@@ -665,4 +666,632 @@ func TestOrderFilter_Matches(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Router tests
+
+func TestNewRouter(t *testing.T) {
+	r := NewRouter()
+
+	if r == nil {
+		t.Fatal("expected non-nil router")
+	}
+	if r.warehouses == nil {
+		t.Error("warehouses map should be initialized")
+	}
+	if r.optimization != OptimizationCost {
+		t.Errorf("default optimization = %s, want cost", r.optimization)
+	}
+}
+
+func TestRouter_SetOptimization(t *testing.T) {
+	r := NewRouter()
+
+	r.SetOptimization(OptimizationSpeed)
+	if r.optimization != OptimizationSpeed {
+		t.Errorf("optimization = %s, want speed", r.optimization)
+	}
+
+	r.SetOptimization(OptimizationBalance)
+	if r.optimization != OptimizationBalance {
+		t.Errorf("optimization = %s, want balance", r.optimization)
+	}
+}
+
+func TestRouter_AddWarehouse(t *testing.T) {
+	r := NewRouter()
+
+	warehouse := &models.Warehouse{
+		ID:     "WH-001",
+		Name:   "Main Warehouse",
+		Active: true,
+	}
+
+	r.AddWarehouse(warehouse)
+
+	if _, ok := r.warehouses["WH-001"]; !ok {
+		t.Error("warehouse not added")
+	}
+}
+
+func TestRouter_SetShippingRate(t *testing.T) {
+	r := NewRouter()
+
+	rate := ShippingRate{
+		CarrierID: "fedex",
+	}
+
+	r.SetShippingRate(rate)
+
+	if _, ok := r.shippingRates["fedex"]; !ok {
+		t.Error("shipping rate not added")
+	}
+}
+
+func TestRouter_RouteOrder_NoWarehouses(t *testing.T) {
+	r := NewRouter()
+	ctx := context.Background()
+
+	order := &models.Order{
+		ID:      "ORD-001",
+		Channel: "shopify",
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 1},
+		},
+		Shipping: models.ShippingInfo{
+			Address: models.Address{State: "CA"},
+		},
+	}
+
+	decision, err := r.RouteOrder(ctx, order, nil)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(decision.Options) != 0 {
+		t.Errorf("expected 0 options, got %d", len(decision.Options))
+	}
+}
+
+func TestRouter_RouteOrder_WithWarehouses(t *testing.T) {
+	r := NewRouter()
+	ctx := context.Background()
+
+	// Add warehouses
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-001",
+		Name:    "West Warehouse",
+		Active:  true,
+		Address: models.Address{State: "CA"},
+	})
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-002",
+		Name:    "East Warehouse",
+		Active:  true,
+		Address: models.Address{State: "NY"},
+	})
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-003",
+		Name:    "Inactive Warehouse",
+		Active:  false,
+		Address: models.Address{State: "TX"},
+	})
+
+	order := &models.Order{
+		ID:      "ORD-001",
+		Channel: "shopify",
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 2},
+		},
+		Shipping: models.ShippingInfo{
+			Address: models.Address{State: "CA"},
+			Method:  "standard",
+		},
+	}
+
+	inventory := map[string]*InventoryInfo{
+		"SKU-001:WH-001": {SKU: "SKU-001", WarehouseID: "WH-001", Available: 10},
+		"SKU-001:WH-002": {SKU: "SKU-001", WarehouseID: "WH-002", Available: 5},
+	}
+
+	decision, err := r.RouteOrder(ctx, order, inventory)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only 2 active warehouses
+	if len(decision.Options) != 2 {
+		t.Errorf("expected 2 options, got %d", len(decision.Options))
+	}
+	if decision.SelectedOption == nil {
+		t.Error("expected a selected option")
+	}
+}
+
+func TestRouter_RouteOrder_NoStockAnywhere(t *testing.T) {
+	r := NewRouter()
+	ctx := context.Background()
+
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-001",
+		Name:    "Warehouse",
+		Active:  true,
+		Address: models.Address{State: "CA"},
+	})
+
+	order := &models.Order{
+		ID:      "ORD-001",
+		Channel: "shopify",
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 2},
+		},
+		Shipping: models.ShippingInfo{
+			Address: models.Address{State: "CA"},
+		},
+	}
+
+	// Empty inventory
+	inventory := map[string]*InventoryInfo{}
+
+	decision, err := r.RouteOrder(ctx, order, inventory)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if decision.SelectedOption == nil {
+		t.Error("should still select best available option")
+	}
+	if decision.SelectedOption.AllItemsInStock {
+		t.Error("AllItemsInStock should be false")
+	}
+}
+
+func TestRouter_RouteOrder_PartialStock(t *testing.T) {
+	r := NewRouter()
+	ctx := context.Background()
+
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-001",
+		Name:    "Warehouse 1",
+		Active:  true,
+		Address: models.Address{State: "CA"},
+	})
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-002",
+		Name:    "Warehouse 2",
+		Active:  true,
+		Address: models.Address{State: "NY"},
+	})
+
+	order := &models.Order{
+		ID:      "ORD-001",
+		Channel: "shopify",
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 5},
+			{SKU: "SKU-002", Quantity: 3},
+		},
+		Shipping: models.ShippingInfo{
+			Address: models.Address{State: "CA"},
+		},
+	}
+
+	// WH-001 has SKU-001, WH-002 has SKU-002
+	inventory := map[string]*InventoryInfo{
+		"SKU-001:WH-001": {SKU: "SKU-001", WarehouseID: "WH-001", Available: 10},
+		"SKU-002:WH-002": {SKU: "SKU-002", WarehouseID: "WH-002", Available: 10},
+	}
+
+	decision, err := r.RouteOrder(ctx, order, inventory)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if decision.IsSplitShipment == false {
+		// Could be either split or best available depending on coverage
+		if decision.SelectedOption != nil && decision.SelectedOption.AllItemsInStock {
+			t.Error("no single warehouse should have all items")
+		}
+	}
+}
+
+func TestRouter_RouteOrder_InsufficientQuantity(t *testing.T) {
+	r := NewRouter()
+	ctx := context.Background()
+
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-001",
+		Name:    "Warehouse",
+		Active:  true,
+		Address: models.Address{State: "CA"},
+	})
+
+	order := &models.Order{
+		ID:      "ORD-001",
+		Channel: "shopify",
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 10}, // Want 10
+		},
+		Shipping: models.ShippingInfo{
+			Address: models.Address{State: "CA"},
+		},
+	}
+
+	// Only 5 available
+	inventory := map[string]*InventoryInfo{
+		"SKU-001:WH-001": {SKU: "SKU-001", WarehouseID: "WH-001", Available: 5},
+	}
+
+	decision, err := r.RouteOrder(ctx, order, inventory)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if decision.SelectedOption.AllItemsInStock {
+		t.Error("should not have all items in stock")
+	}
+}
+
+func TestRouter_CalculateDistance(t *testing.T) {
+	r := NewRouter()
+
+	// Same state
+	d := r.calculateDistance(models.Address{State: "CA"}, models.Address{State: "CA"})
+	if d != 50 {
+		t.Errorf("same state distance = %f, want 50", d)
+	}
+
+	// Different states
+	d = r.calculateDistance(models.Address{State: "CA"}, models.Address{State: "NY"})
+	if d != 500 {
+		t.Errorf("different state distance = %f, want 500", d)
+	}
+}
+
+func TestRouter_EstimateDeliveryDays(t *testing.T) {
+	r := NewRouter()
+
+	tests := []struct {
+		distance float64
+		method   string
+		expected int
+	}{
+		{100, "express", 1},
+		{100, "overnight", 1},
+		{100, "expedited", 2},
+		{100, "2day", 2},
+		{50, "standard", 2},
+		{200, "standard", 3},
+		{600, "standard", 5},
+		{1500, "standard", 7},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s_%fmi", tt.method, tt.distance), func(t *testing.T) {
+			days := r.estimateDeliveryDays(tt.distance, tt.method)
+			if days != tt.expected {
+				t.Errorf("days = %d, want %d", days, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRouter_CalculateShippingCost(t *testing.T) {
+	r := NewRouter()
+
+	order := &models.Order{
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 1},
+			{SKU: "SKU-002", Quantity: 1},
+		},
+	}
+
+	cost := r.calculateShippingCost(100, order)
+
+	// Base: 5.00 + PerMile: 0.01*100 = 1.00 + PerItem: 0.50*2 = 1.00 = 7.00
+	expected := 7.00
+	costFloat, _ := cost.Float64()
+	if costFloat != expected {
+		t.Errorf("cost = %f, want %f", costFloat, expected)
+	}
+}
+
+func TestRouter_CalculateScore_Cost(t *testing.T) {
+	r := NewRouter()
+	r.SetOptimization(OptimizationCost)
+
+	option := RoutingOption{
+		ShippingCost:    newDecimal(10.00),
+		EstimatedDays:   3,
+		AllItemsInStock: true,
+		Distance:        100,
+	}
+
+	score := r.calculateScore(option)
+
+	// 100 - cost*2(20) + allInStock(50) - distance*0.05(5) = 125
+	if score != 125 {
+		t.Errorf("cost score = %f, want 125", score)
+	}
+}
+
+func TestRouter_CalculateScore_Speed(t *testing.T) {
+	r := NewRouter()
+	r.SetOptimization(OptimizationSpeed)
+
+	option := RoutingOption{
+		ShippingCost:    newDecimal(10.00),
+		EstimatedDays:   2,
+		AllItemsInStock: true,
+		Distance:        100,
+	}
+
+	score := r.calculateScore(option)
+
+	// 100 - days*10(20) + allInStock(50) - distance*0.05(5) = 125
+	if score != 125 {
+		t.Errorf("speed score = %f, want 125", score)
+	}
+}
+
+func TestRouter_CalculateScore_Balance(t *testing.T) {
+	r := NewRouter()
+	r.SetOptimization(OptimizationBalance)
+
+	option := RoutingOption{
+		ShippingCost:    newDecimal(10.00),
+		EstimatedDays:   3,
+		AllItemsInStock: true,
+		Distance:        100,
+		ItemsAvailable:  map[string]int{"SKU-001": 20, "SKU-002": 10},
+	}
+
+	score := r.calculateScore(option)
+
+	// 100 + totalAvailable*0.5(15) + allInStock(50) - distance*0.05(5) = 160
+	if score != 160 {
+		t.Errorf("balance score = %f, want 160", score)
+	}
+}
+
+func TestRouter_CalculateScore_NegativeBecomesZero(t *testing.T) {
+	r := NewRouter()
+	r.SetOptimization(OptimizationCost)
+
+	option := RoutingOption{
+		ShippingCost:    newDecimal(100.00), // Very high cost
+		EstimatedDays:   3,
+		AllItemsInStock: false,
+		Distance:        1000,
+	}
+
+	score := r.calculateScore(option)
+
+	// 100 - cost*2(200) - distance*0.05(50) = -150 -> 0
+	if score != 0 {
+		t.Errorf("negative score should be 0, got %f", score)
+	}
+}
+
+func TestRouter_GenerateReason(t *testing.T) {
+	r := NewRouter()
+
+	option := RoutingOption{
+		ShippingCost:  newDecimal(10.50),
+		EstimatedDays: 3,
+	}
+
+	r.SetOptimization(OptimizationCost)
+	reason := r.generateReason(option)
+	if reason != "Lowest shipping cost: $10.50" {
+		t.Errorf("cost reason = %s", reason)
+	}
+
+	r.SetOptimization(OptimizationSpeed)
+	reason = r.generateReason(option)
+	if reason != "Fastest delivery: 3 days" {
+		t.Errorf("speed reason = %s", reason)
+	}
+
+	r.SetOptimization(OptimizationBalance)
+	reason = r.generateReason(option)
+	if reason != "Best stock balance" {
+		t.Errorf("balance reason = %s", reason)
+	}
+}
+
+func TestRouter_AutoRoute(t *testing.T) {
+	r := NewRouter()
+	ctx := context.Background()
+
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-001",
+		Name:    "Main Warehouse",
+		Active:  true,
+		Address: models.Address{State: "CA"},
+	})
+
+	order := &models.Order{
+		ID:      "ORD-001",
+		Channel: "shopify",
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 2},
+		},
+		Shipping: models.ShippingInfo{
+			Address: models.Address{State: "CA"},
+		},
+	}
+
+	inventory := map[string]*InventoryInfo{
+		"SKU-001:WH-001": {SKU: "SKU-001", WarehouseID: "WH-001", Available: 10},
+	}
+
+	result, err := r.AutoRoute(ctx, order, inventory)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.WarehouseID != "WH-001" {
+		t.Errorf("WarehouseID = %s, want WH-001", result.WarehouseID)
+	}
+}
+
+func TestRouter_AutoRoute_SplitShipment(t *testing.T) {
+	r := NewRouter()
+	ctx := context.Background()
+
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-001",
+		Name:    "Warehouse 1",
+		Active:  true,
+		Address: models.Address{State: "CA"},
+	})
+	r.AddWarehouse(&models.Warehouse{
+		ID:      "WH-002",
+		Name:    "Warehouse 2",
+		Active:  true,
+		Address: models.Address{State: "NY"},
+	})
+
+	order := &models.Order{
+		ID:      "ORD-001",
+		Channel: "shopify",
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 2},
+			{SKU: "SKU-002", Quantity: 2},
+		},
+		Shipping: models.ShippingInfo{
+			Address: models.Address{State: "CA"},
+		},
+	}
+
+	// Each warehouse has only one SKU
+	inventory := map[string]*InventoryInfo{
+		"SKU-001:WH-001": {SKU: "SKU-001", WarehouseID: "WH-001", Available: 10},
+		"SKU-002:WH-002": {SKU: "SKU-002", WarehouseID: "WH-002", Available: 10},
+	}
+
+	result, err := r.AutoRoute(ctx, order, inventory)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Should assign to first split warehouse
+	if result.WarehouseID == "" {
+		t.Error("WarehouseID should be assigned")
+	}
+}
+
+func TestProcessor_RouteOrder(t *testing.T) {
+	router := NewRouter()
+	router.AddWarehouse(&models.Warehouse{
+		ID:      "WH-001",
+		Name:    "Warehouse",
+		Active:  true,
+		Address: models.Address{State: "CA"},
+	})
+
+	p := NewProcessor(router)
+	ctx := context.Background()
+
+	order := &models.Order{
+		ID:      "ORD-001",
+		Channel: "shopify",
+		Items: []models.OrderItem{
+			{SKU: "SKU-001", Quantity: 1},
+		},
+		Shipping: models.ShippingInfo{
+			Address: models.Address{State: "CA"},
+		},
+	}
+	p.CreateOrder(ctx, order)
+
+	inventory := map[string]*InventoryInfo{
+		"SKU-001:WH-001": {SKU: "SKU-001", WarehouseID: "WH-001", Available: 10},
+	}
+
+	decision, err := p.RouteOrder(ctx, "ORD-001", inventory)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if decision == nil {
+		t.Fatal("expected routing decision")
+	}
+}
+
+func TestProcessor_RouteOrder_NotFound(t *testing.T) {
+	router := NewRouter()
+	p := NewProcessor(router)
+	ctx := context.Background()
+
+	_, err := p.RouteOrder(ctx, "NONEXISTENT", nil)
+
+	if err == nil {
+		t.Error("expected error for nonexistent order")
+	}
+}
+
+func TestProcessor_AssignWarehouse_WithCallback(t *testing.T) {
+	p := NewProcessor(nil)
+	ctx := context.Background()
+
+	var updatedOrder *models.Order
+	p.SetCallbacks(nil, func(o *models.Order) { updatedOrder = o }, nil)
+
+	order := &models.Order{ID: "ORD-001"}
+	p.CreateOrder(ctx, order)
+
+	err := p.AssignWarehouse(ctx, "ORD-001", "WH-001")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updatedOrder == nil {
+		t.Error("onUpdate callback not called")
+	}
+}
+
+func TestProcessor_HoldOrder_WithCallback(t *testing.T) {
+	p := NewProcessor(nil)
+	ctx := context.Background()
+
+	var updatedOrder *models.Order
+	p.SetCallbacks(nil, func(o *models.Order) { updatedOrder = o }, nil)
+
+	order := &models.Order{ID: "ORD-001"}
+	p.CreateOrder(ctx, order)
+
+	err := p.HoldOrder(ctx, "ORD-001", "Payment check")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updatedOrder == nil {
+		t.Error("onUpdate callback not called")
+	}
+}
+
+func TestProcessor_CancelOrder_WithCallback(t *testing.T) {
+	p := NewProcessor(nil)
+	ctx := context.Background()
+
+	var updatedOrder *models.Order
+	p.SetCallbacks(nil, func(o *models.Order) { updatedOrder = o }, nil)
+
+	order := &models.Order{ID: "ORD-001"}
+	p.CreateOrder(ctx, order)
+
+	err := p.CancelOrder(ctx, "ORD-001", "Customer request")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if updatedOrder == nil {
+		t.Error("onUpdate callback not called")
+	}
+}
+
+// Helper function
+func newDecimal(f float64) decimal.Decimal {
+	return decimal.NewFromFloat(f)
 }

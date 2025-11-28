@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -491,5 +492,142 @@ func TestEventType_Constants(t *testing.T) {
 		if et == "" {
 			t.Error("event type should not be empty")
 		}
+	}
+}
+
+func TestEngine_SyncToChannels_Success(t *testing.T) {
+	e := NewEngine()
+	ctx := context.Background()
+
+	// Setup inventory
+	inv := &models.Inventory{
+		SKU:        "TEST-001",
+		TotalStock: 100,
+		Available:  100,
+		Warehouses: map[string]models.WarehouseStock{
+			"WH-001": {WarehouseID: "WH-001", Quantity: 100, Available: 100},
+		},
+	}
+	e.SetInventory(inv)
+
+	// Register channel handler
+	handler := &mockChannelHandler{
+		channelID: "shopify",
+		inventory: make(map[string]int),
+	}
+	e.RegisterChannel(handler)
+
+	err := e.SyncToChannels(ctx, "TEST-001")
+	if err != nil {
+		t.Fatalf("SyncToChannels failed: %v", err)
+	}
+
+	// Verify allocation was set
+	inv, _ = e.GetInventory("TEST-001")
+	if inv.Allocated == nil {
+		t.Error("Allocated should be set after sync")
+	}
+}
+
+func TestEngine_SyncToChannels_WithError(t *testing.T) {
+	e := NewEngine()
+	ctx := context.Background()
+
+	// Setup inventory
+	inv := &models.Inventory{
+		SKU:        "TEST-001",
+		TotalStock: 100,
+		Available:  100,
+		Warehouses: make(map[string]models.WarehouseStock),
+	}
+	e.SetInventory(inv)
+
+	// Track alerts
+	var receivedAlert *models.Alert
+	e.SetAlertCallback(func(a *models.Alert) {
+		receivedAlert = a
+	})
+
+	// Register handler that returns error
+	handler := &mockChannelHandler{
+		channelID: "shopify",
+		inventory: make(map[string]int),
+		updateErr: fmt.Errorf("sync failed"),
+	}
+	e.RegisterChannel(handler)
+
+	err := e.SyncToChannels(ctx, "TEST-001")
+	if err == nil {
+		t.Error("expected error from failed sync")
+	}
+
+	// Verify alert was created
+	if receivedAlert == nil {
+		t.Error("expected sync error alert")
+	}
+}
+
+func TestEngine_HandleEvent(t *testing.T) {
+	e := NewEngine()
+
+	// Setup inventory for sync
+	inv := &models.Inventory{
+		SKU:        "TEST-001",
+		TotalStock: 100,
+		Available:  100,
+		Warehouses: make(map[string]models.WarehouseStock),
+	}
+	e.SetInventory(inv)
+
+	// Handle sale event (should trigger sync)
+	e.handleEvent(InventoryEvent{
+		Type: EventTypeSale,
+		SKU:  "TEST-001",
+	})
+
+	// Handle adjustment event (should trigger sync)
+	e.handleEvent(InventoryEvent{
+		Type: EventTypeAdjustment,
+		SKU:  "TEST-001",
+	})
+
+	// Handle other event type (should not trigger sync)
+	e.handleEvent(InventoryEvent{
+		Type: EventTypeReturn,
+		SKU:  "TEST-001",
+	})
+
+	// Give goroutines time to execute
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestEngine_CreateAlert_NoCallback(t *testing.T) {
+	e := NewEngine()
+
+	// Should not panic when no callback is set
+	e.createAlert(models.AlertTypeLowStock, models.AlertSeverityWarning, "SKU-001", "shopify", "test message")
+}
+
+func TestEngine_CreateAlert_WithCallback(t *testing.T) {
+	e := NewEngine()
+
+	var receivedAlert *models.Alert
+	e.SetAlertCallback(func(a *models.Alert) {
+		receivedAlert = a
+	})
+
+	e.createAlert(models.AlertTypeLowStock, models.AlertSeverityWarning, "SKU-001", "shopify", "test message")
+
+	if receivedAlert == nil {
+		t.Fatal("expected alert")
+	}
+	if receivedAlert.Type != models.AlertTypeLowStock {
+		t.Errorf("Type = %s, want LowStock", receivedAlert.Type)
+	}
+	if receivedAlert.SKU != "SKU-001" {
+		t.Errorf("SKU = %s, want SKU-001", receivedAlert.SKU)
+	}
+	if receivedAlert.Channel != "shopify" {
+		t.Errorf("Channel = %s, want shopify", receivedAlert.Channel)
 	}
 }
