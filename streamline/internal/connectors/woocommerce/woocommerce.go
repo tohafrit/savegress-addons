@@ -713,7 +713,7 @@ func (c *Connector) GetOrder(ctx context.Context, orderID string) (*connectors.O
 		Total:          total,
 		Currency:       o.Currency,
 		Items:          items,
-		BillingAddress: connectors.Address{
+		BillingAddress: &connectors.Address{
 			Name:        o.Billing.FirstName + " " + o.Billing.LastName,
 			Line1:       o.Billing.Address1,
 			City:        o.Billing.City,
@@ -723,7 +723,7 @@ func (c *Connector) GetOrder(ctx context.Context, orderID string) (*connectors.O
 			Phone:       o.Billing.Phone,
 			Email:       o.Billing.Email,
 		},
-		ShippingAddress: connectors.Address{
+		ShippingAddress: &connectors.Address{
 			Name:        o.Shipping.FirstName + " " + o.Shipping.LastName,
 			Line1:       o.Shipping.Address1,
 			City:        o.Shipping.City,
@@ -732,7 +732,7 @@ func (c *Connector) GetOrder(ctx context.Context, orderID string) (*connectors.O
 			CountryCode: o.Shipping.Country,
 		},
 		CustomerID: strconv.Itoa(o.CustomerID),
-		CreatedAt:  createdAt,
+		CreatedAt:  createdAt.Format(time.RFC3339),
 	}, nil
 }
 
@@ -790,7 +790,7 @@ func (c *Connector) GetPrice(ctx context.Context, productID string) (*connectors
 		OnSale:      p.OnSale,
 		Currency:    "USD", // WooCommerce stores default currency in settings
 		ChannelID:   "woocommerce",
-		LastUpdated: time.Now(),
+		LastUpdated: time.Now().Format(time.RFC3339),
 	}, nil
 }
 
@@ -813,7 +813,7 @@ func (c *Connector) UpdatePrice(ctx context.Context, update connectors.PriceUpda
 // SyncInventory performs full inventory synchronization
 func (c *Connector) SyncInventory(ctx context.Context) (*connectors.SyncResult, error) {
 	result := &connectors.SyncResult{
-		StartedAt: time.Now(),
+		StartedAt: time.Now().Format(time.RFC3339),
 		Channel:   "woocommerce",
 	}
 
@@ -821,13 +821,13 @@ func (c *Connector) SyncInventory(ctx context.Context) (*connectors.SyncResult, 
 	products, err := c.GetProducts(ctx, connectors.ProductParams{Limit: 100})
 	if err != nil {
 		result.Errors = append(result.Errors, err.Error())
-		result.CompletedAt = time.Now()
+		result.CompletedAt = time.Now().Format(time.RFC3339)
 		return result, err
 	}
 
 	result.ItemsProcessed = len(products)
 	result.ItemsSucceeded = len(products)
-	result.CompletedAt = time.Now()
+	result.CompletedAt = time.Now().Format(time.RFC3339)
 
 	return result, nil
 }
@@ -859,12 +859,10 @@ func (c *Connector) GetWebhooks(ctx context.Context) ([]connectors.Webhook, erro
 	for _, wh := range wooWebhooks {
 		webhooks = append(webhooks, connectors.Webhook{
 			ID:        strconv.Itoa(wh.ID),
-			Name:      wh.Name,
 			URL:       wh.DeliveryURL,
 			Topic:     wh.Topic,
-			Secret:    wh.Secret,
 			Active:    wh.Status == "active",
-			ChannelID: "woocommerce",
+			CreatedAt: wh.DateCreated,
 		})
 	}
 
@@ -876,10 +874,8 @@ func (c *Connector) CreateWebhook(ctx context.Context, webhook connectors.Webhoo
 	path := "/webhooks"
 
 	body := map[string]interface{}{
-		"name":         webhook.Name,
 		"topic":        webhook.Topic,
 		"delivery_url": webhook.URL,
-		"secret":       webhook.Secret,
 		"status":       "active",
 	}
 

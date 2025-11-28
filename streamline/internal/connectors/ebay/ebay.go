@@ -752,7 +752,7 @@ func (c *Connector) UpdatePrice(ctx context.Context, update connectors.PriceUpda
 // SyncInventory performs full inventory synchronization
 func (c *Connector) SyncInventory(ctx context.Context) (*connectors.SyncResult, error) {
 	result := &connectors.SyncResult{
-		StartedAt: time.Now(),
+		StartedAt: time.Now().Format(time.RFC3339),
 		Channel:   "ebay",
 	}
 
@@ -760,13 +760,13 @@ func (c *Connector) SyncInventory(ctx context.Context) (*connectors.SyncResult, 
 	products, err := c.GetProducts(ctx, connectors.ProductParams{Limit: 200})
 	if err != nil {
 		result.Errors = append(result.Errors, err.Error())
-		result.CompletedAt = time.Now()
+		result.CompletedAt = time.Now().Format(time.RFC3339)
 		return result, err
 	}
 
 	result.ItemsProcessed = len(products)
 	result.ItemsSucceeded = len(products)
-	result.CompletedAt = time.Now()
+	result.CompletedAt = time.Now().Format(time.RFC3339)
 
 	return result, nil
 }
@@ -812,8 +812,8 @@ func (c *Connector) CreateShipment(ctx context.Context, orderID string, shipment
 		"trackingNumber":      shipment.TrackingNumber,
 	}
 
-	if !shipment.ShippedAt.IsZero() {
-		body["shippedDate"] = shipment.ShippedAt.Format(time.RFC3339)
+	if shipment.ShippedAt != "" {
+		body["shippedDate"] = shipment.ShippedAt
 	}
 
 	_, err = c.doRequest(ctx, "POST", path, body)
