@@ -10,10 +10,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/savegress/datawatch/internal/alerts"
 	"github.com/savegress/datawatch/internal/anomaly"
 	"github.com/savegress/datawatch/internal/api"
 	"github.com/savegress/datawatch/internal/config"
 	"github.com/savegress/datawatch/internal/metrics"
+	"github.com/savegress/datawatch/internal/quality"
+	"github.com/savegress/datawatch/internal/schema"
 	"github.com/savegress/datawatch/internal/storage"
 )
 
@@ -30,6 +33,10 @@ func main() {
 	}
 	defer store.Close()
 
+	// Create context for services
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Initialize metrics engine
 	metricsEngine := metrics.NewEngine(store)
 
@@ -42,22 +49,114 @@ func main() {
 	}
 	anomalyDetector := anomaly.NewDetector(anomalyConfig, store)
 
+	// Initialize alerts engine
+	alertsConfig := &alerts.Config{
+		Enabled:            true,
+		EvaluationInterval: 30 * time.Second,
+		RetentionDays:      30,
+	}
+	alertsEngine := alerts.NewEngine(alertsConfig)
+
+	// Configure alert channels from config
+	if cfg.Alerts.Channels.Slack != nil && cfg.Alerts.Channels.Slack.WebhookURL != "" {
+		alertsEngine.AddChannel(&alerts.Channel{
+			ID:      "slack",
+			Type:    alerts.ChannelTypeSlack,
+			Name:    "Slack",
+			Enabled: true,
+			Config: map[string]interface{}{
+				"webhook_url": cfg.Alerts.Channels.Slack.WebhookURL,
+				"channel":     cfg.Alerts.Channels.Slack.Channel,
+			},
+		})
+	}
+	if cfg.Alerts.Channels.Email != nil && cfg.Alerts.Channels.Email.SMTPHost != "" {
+		alertsEngine.AddChannel(&alerts.Channel{
+			ID:      "email",
+			Type:    alerts.ChannelTypeEmail,
+			Name:    "Email",
+			Enabled: true,
+			Config: map[string]interface{}{
+				"smtp_host": cfg.Alerts.Channels.Email.SMTPHost,
+				"smtp_port": cfg.Alerts.Channels.Email.SMTPPort,
+				"from":      cfg.Alerts.Channels.Email.From,
+				"username":  cfg.Alerts.Channels.Email.Username,
+				"password":  cfg.Alerts.Channels.Email.Password,
+			},
+		})
+	}
+	if cfg.Alerts.Channels.PagerDuty != nil && cfg.Alerts.Channels.PagerDuty.ServiceKey != "" {
+		alertsEngine.AddChannel(&alerts.Channel{
+			ID:      "pagerduty",
+			Type:    alerts.ChannelTypePagerDuty,
+			Name:    "PagerDuty",
+			Enabled: true,
+			Config: map[string]interface{}{
+				"service_key": cfg.Alerts.Channels.PagerDuty.ServiceKey,
+			},
+		})
+	}
+	if cfg.Alerts.Channels.Webhook != nil && cfg.Alerts.Channels.Webhook.URL != "" {
+		alertsEngine.AddChannel(&alerts.Channel{
+			ID:      "webhook",
+			Type:    alerts.ChannelTypeWebhook,
+			Name:    "Webhook",
+			Enabled: true,
+			Config: map[string]interface{}{
+				"url":     cfg.Alerts.Channels.Webhook.URL,
+				"headers": cfg.Alerts.Channels.Webhook.Headers,
+			},
+		})
+	}
+
+	// Start alerts engine
+	if err := alertsEngine.Start(ctx); err != nil {
+		log.Printf("Warning: Failed to start alerts engine: %v", err)
+	}
+
 	// Set up anomaly callback for alerts
 	anomalyDetector.SetAnomalyCallback(func(a *anomaly.Anomaly) {
 		log.Printf("Anomaly detected: %s - %s (severity: %s)", a.MetricName, a.Description, a.Severity)
-		// TODO: Send to alert channels (Slack, PagerDuty, etc.)
+
+		// Convert anomaly severity to alert severity
+		var alertSeverity alerts.Severity
+		switch a.Severity {
+		case "critical":
+			alertSeverity = alerts.SeverityCritical
+		case "high":
+			alertSeverity = alerts.SeverityHigh
+		case "warning":
+			alertSeverity = alerts.SeverityWarning
+		default:
+			alertSeverity = alerts.SeverityInfo
+		}
+
+		// Fire alert through alerts engine
+		alertsEngine.FireManualAlert(&alerts.Alert{
+			Type:           alerts.AlertTypeAnomaly,
+			Severity:       alertSeverity,
+			Title:          fmt.Sprintf("Anomaly: %s", a.MetricName),
+			Message:        a.Description,
+			Metric:         a.MetricName,
+			CurrentValue:   a.Value,
+			ThresholdValue: a.Expected.Max,
+			Labels: map[string]string{
+				"anomaly_type": string(a.Type),
+			},
+		})
 	})
 
 	// Start metrics engine
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	if err := metricsEngine.Start(ctx); err != nil {
 		log.Fatalf("Failed to start metrics engine: %v", err)
 	}
 
+	// Initialize quality monitor (nil for now, can be configured)
+	var qualityMonitor *quality.Monitor
+	var schemaTracker *schema.Tracker
+
 	// Create API server
-	server := api.NewServer(cfg, metricsEngine, anomalyDetector, store)
+	server := api.NewServer(cfg, metricsEngine, anomalyDetector, store, qualityMonitor, schemaTracker, alertsEngine)
 
 	// Start HTTP server
 	httpServer := &http.Server{
@@ -92,6 +191,7 @@ func main() {
 	}
 
 	metricsEngine.Stop()
+	alertsEngine.Stop()
 
 	log.Println("DataWatch stopped")
 }

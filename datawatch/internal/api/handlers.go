@@ -7,8 +7,11 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/savegress/datawatch/internal/alerts"
 	"github.com/savegress/datawatch/internal/anomaly"
 	"github.com/savegress/datawatch/internal/metrics"
+	"github.com/savegress/datawatch/internal/quality"
+	"github.com/savegress/datawatch/internal/schema"
 	"github.com/savegress/datawatch/internal/storage"
 )
 
@@ -17,6 +20,28 @@ type Handlers struct {
 	metrics  *metrics.Engine
 	anomaly  *anomaly.Detector
 	storage  storage.MetricStorage
+	quality  *quality.Monitor
+	schema   *schema.Tracker
+	alerts   *alerts.Engine
+}
+
+// NewHandlers creates new handlers
+func NewHandlers(
+	metricsEngine *metrics.Engine,
+	anomalyDetector *anomaly.Detector,
+	store storage.MetricStorage,
+	qualityMonitor *quality.Monitor,
+	schemaTracker *schema.Tracker,
+	alertsEngine *alerts.Engine,
+) *Handlers {
+	return &Handlers{
+		metrics: metricsEngine,
+		anomaly: anomalyDetector,
+		storage: store,
+		quality: qualityMonitor,
+		schema:  schemaTracker,
+		alerts:  alertsEngine,
+	}
 }
 
 // Response helpers
@@ -445,4 +470,496 @@ func parseTimeRange(r *http.Request) (from, to time.Time, err error) {
 
 func generateID() string {
 	return strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// Quality Handlers
+
+// ListQualityRules returns all quality rules
+func (h *Handlers) ListQualityRules(w http.ResponseWriter, r *http.Request) {
+	rules := h.quality.ListRules()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"rules": rules,
+		"count": len(rules),
+	})
+}
+
+// CreateQualityRule creates a new quality rule
+func (h *Handlers) CreateQualityRule(w http.ResponseWriter, r *http.Request) {
+	var rule quality.Rule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if rule.ID == "" {
+		rule.ID = generateID()
+	}
+	rule.Enabled = true
+
+	h.quality.AddRule(&rule)
+	writeJSON(w, http.StatusCreated, rule)
+}
+
+// GetQualityRule returns a specific quality rule
+func (h *Handlers) GetQualityRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rule, ok := h.quality.GetRule(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Rule not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, rule)
+}
+
+// DeleteQualityRule deletes a quality rule
+func (h *Handlers) DeleteQualityRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	h.quality.DeleteRule(id)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// GetQualityScore returns the quality score for a table or overall
+func (h *Handlers) GetQualityScore(w http.ResponseWriter, r *http.Request) {
+	table := r.URL.Query().Get("table")
+
+	if table != "" {
+		score, ok := h.quality.GetScore(table)
+		if !ok {
+			writeError(w, http.StatusNotFound, "Table not found")
+			return
+		}
+		writeJSON(w, http.StatusOK, score)
+	} else {
+		overallScore := h.quality.GetOverallScore()
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"overall_score": overallScore,
+		})
+	}
+}
+
+// ListQualityViolations returns quality violations
+func (h *Handlers) ListQualityViolations(w http.ResponseWriter, r *http.Request) {
+	filter := quality.ViolationFilter{
+		Table:    r.URL.Query().Get("table"),
+		Field:    r.URL.Query().Get("field"),
+		Severity: r.URL.Query().Get("severity"),
+	}
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil {
+			filter.Limit = l
+		}
+	}
+
+	violations := h.quality.GetViolations(filter)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"violations": violations,
+		"count":      len(violations),
+	})
+}
+
+// AcknowledgeQualityViolation acknowledges a violation
+func (h *Handlers) AcknowledgeQualityViolation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		User string `json:"user"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if err := h.quality.AcknowledgeViolation(id, req.User); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
+}
+
+// GetQualityReport generates a quality report
+func (h *Handlers) GetQualityReport(w http.ResponseWriter, r *http.Request) {
+	from, to, err := parseTimeRange(r)
+	if err != nil {
+		from = time.Now().Add(-24 * time.Hour)
+		to = time.Now()
+	}
+
+	report := h.quality.GetReport(from, to)
+	writeJSON(w, http.StatusOK, report)
+}
+
+// ValidateRecord validates a record against quality rules
+func (h *Handlers) ValidateRecord(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Table  string                 `json:"table"`
+		Record map[string]interface{} `json:"record"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	result := h.quality.ValidateRecord(req.Table, req.Record)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// GetQualityStats returns quality monitoring statistics
+func (h *Handlers) GetQualityStats(w http.ResponseWriter, r *http.Request) {
+	stats := h.quality.GetStats()
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// Schema Handlers
+
+// ListSchemas returns all tracked schemas
+func (h *Handlers) ListSchemas(w http.ResponseWriter, r *http.Request) {
+	schemas := h.schema.ListSchemas()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"schemas": schemas,
+		"count":   len(schemas),
+	})
+}
+
+// GetSchema returns a specific table schema
+func (h *Handlers) GetSchema(w http.ResponseWriter, r *http.Request) {
+	database := chi.URLParam(r, "database")
+	schemaName := chi.URLParam(r, "schema")
+	table := chi.URLParam(r, "table")
+
+	s, ok := h.schema.GetSchema(database, schemaName, table)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Schema not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+// RegisterSchema registers a table schema
+func (h *Handlers) RegisterSchema(w http.ResponseWriter, r *http.Request) {
+	var s schema.TableSchema
+	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	h.schema.RegisterSchema(&s)
+	writeJSON(w, http.StatusCreated, s)
+}
+
+// ListSchemaChanges returns schema changes
+func (h *Handlers) ListSchemaChanges(w http.ResponseWriter, r *http.Request) {
+	filter := schema.ChangeFilter{
+		Table: r.URL.Query().Get("table"),
+	}
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil {
+			filter.Limit = l
+		}
+	}
+
+	if breaking := r.URL.Query().Get("breaking"); breaking == "true" {
+		b := true
+		filter.Breaking = &b
+	}
+
+	changes := h.schema.GetChanges(filter)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"changes": changes,
+		"count":   len(changes),
+	})
+}
+
+// GetSchemaChange returns a specific schema change
+func (h *Handlers) GetSchemaChange(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	change, ok := h.schema.GetChange(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Change not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, change)
+}
+
+// ProcessDDLEvent processes a DDL event
+func (h *Handlers) ProcessDDLEvent(w http.ResponseWriter, r *http.Request) {
+	var ddl schema.DDLEvent
+	if err := json.NewDecoder(r.Body).Decode(&ddl); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	change, err := h.schema.ProcessDDLEvent(ddl)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if change != nil {
+		writeJSON(w, http.StatusOK, change)
+	} else {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "processed"})
+	}
+}
+
+// CreateSchemaSnapshot creates a schema snapshot
+func (h *Handlers) CreateSchemaSnapshot(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	snapshot := h.schema.CreateSnapshot(req.Description)
+	writeJSON(w, http.StatusCreated, snapshot)
+}
+
+// ListSchemaSnapshots returns all snapshots
+func (h *Handlers) ListSchemaSnapshots(w http.ResponseWriter, r *http.Request) {
+	snapshots := h.schema.ListSnapshots()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"snapshots": snapshots,
+		"count":     len(snapshots),
+	})
+}
+
+// GetSchemaSnapshot returns a specific snapshot
+func (h *Handlers) GetSchemaSnapshot(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	snapshot, ok := h.schema.GetSnapshot(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Snapshot not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+// GetSchemaStats returns schema tracking statistics
+func (h *Handlers) GetSchemaStats(w http.ResponseWriter, r *http.Request) {
+	stats := h.schema.GetStats()
+	writeJSON(w, http.StatusOK, stats)
+}
+
+// Alert Handlers
+
+// ListAlertRules returns all alert rules
+func (h *Handlers) ListAlertRules(w http.ResponseWriter, r *http.Request) {
+	rules := h.alerts.ListRules()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"rules": rules,
+		"count": len(rules),
+	})
+}
+
+// CreateAlertRule creates a new alert rule
+func (h *Handlers) CreateAlertRule(w http.ResponseWriter, r *http.Request) {
+	var rule alerts.Rule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if rule.ID == "" {
+		rule.ID = generateID()
+	}
+	rule.Enabled = true
+
+	h.alerts.AddRule(&rule)
+	writeJSON(w, http.StatusCreated, rule)
+}
+
+// GetAlertRule returns a specific alert rule
+func (h *Handlers) GetAlertRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	rule, ok := h.alerts.GetRule(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Rule not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, rule)
+}
+
+// UpdateAlertRule updates an alert rule
+func (h *Handlers) UpdateAlertRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var rule alerts.Rule
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	rule.ID = id
+	h.alerts.UpdateRule(&rule)
+	writeJSON(w, http.StatusOK, rule)
+}
+
+// DeleteAlertRule deletes an alert rule
+func (h *Handlers) DeleteAlertRule(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	h.alerts.DeleteRule(id)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// ListAlerts returns alerts
+func (h *Handlers) ListAlerts(w http.ResponseWriter, r *http.Request) {
+	filter := alerts.AlertFilter{}
+
+	if status := r.URL.Query().Get("status"); status != "" {
+		filter.Status = alerts.Status(status)
+	}
+	if severity := r.URL.Query().Get("severity"); severity != "" {
+		filter.Severity = alerts.Severity(severity)
+	}
+	if alertType := r.URL.Query().Get("type"); alertType != "" {
+		filter.Type = alerts.AlertType(alertType)
+	}
+
+	alertsList := h.alerts.GetAlerts(filter)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"alerts": alertsList,
+		"count":  len(alertsList),
+	})
+}
+
+// GetAlert returns a specific alert
+func (h *Handlers) GetAlert(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	alert, ok := h.alerts.GetAlert(id)
+	if !ok {
+		writeError(w, http.StatusNotFound, "Alert not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, alert)
+}
+
+// AcknowledgeAlert acknowledges an alert
+func (h *Handlers) AcknowledgeAlert(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		User string `json:"user"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if err := h.alerts.AcknowledgeAlert(id, req.User); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
+}
+
+// ResolveAlert resolves an alert
+func (h *Handlers) ResolveAlert(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		User string `json:"user"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if err := h.alerts.ResolveAlert(id, req.User); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
+}
+
+// SnoozeAlert snoozes an alert
+func (h *Handlers) SnoozeAlert(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req struct {
+		Duration string `json:"duration"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	duration, err := time.ParseDuration(req.Duration)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid duration")
+		return
+	}
+
+	if err := h.alerts.SnoozeAlert(id, duration); err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "snoozed"})
+}
+
+// ListAlertChannels returns all notification channels
+func (h *Handlers) ListAlertChannels(w http.ResponseWriter, r *http.Request) {
+	channels := h.alerts.ListChannels()
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"channels": channels,
+		"count":    len(channels),
+	})
+}
+
+// CreateAlertChannel creates a notification channel
+func (h *Handlers) CreateAlertChannel(w http.ResponseWriter, r *http.Request) {
+	var channel alerts.Channel
+	if err := json.NewDecoder(r.Body).Decode(&channel); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if channel.ID == "" {
+		channel.ID = generateID()
+	}
+	channel.Enabled = true
+
+	h.alerts.AddChannel(&channel)
+	writeJSON(w, http.StatusCreated, channel)
+}
+
+// DeleteAlertChannel deletes a notification channel
+func (h *Handlers) DeleteAlertChannel(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	h.alerts.DeleteChannel(id)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// GetAlertSummary returns an alert summary
+func (h *Handlers) GetAlertSummary(w http.ResponseWriter, r *http.Request) {
+	summary := h.alerts.GetSummary()
+	writeJSON(w, http.StatusOK, summary)
+}
+
+// FireTestAlert fires a test alert
+func (h *Handlers) FireTestAlert(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title    string         `json:"title"`
+		Message  string         `json:"message"`
+		Severity alerts.Severity `json:"severity"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	alert := &alerts.Alert{
+		Type:     alerts.AlertTypeThreshold,
+		Severity: req.Severity,
+		Title:    req.Title,
+		Message:  req.Message,
+	}
+
+	h.alerts.FireManualAlert(alert)
+	writeJSON(w, http.StatusOK, alert)
 }

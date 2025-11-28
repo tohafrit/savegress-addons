@@ -1,0 +1,567 @@
+package alerts
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/smtp"
+	"strings"
+	"time"
+)
+
+// SlackNotifier sends alerts to Slack
+type SlackNotifier struct {
+	webhookURL string
+	client     *http.Client
+}
+
+// NewSlackNotifier creates a new Slack notifier
+func NewSlackNotifier(webhookURL string) *SlackNotifier {
+	return &SlackNotifier{
+		webhookURL: webhookURL,
+		client:     &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (n *SlackNotifier) Type() ActionType {
+	return ActionTypeSlack
+}
+
+func (n *SlackNotifier) Send(ctx context.Context, alert *Alert, action AlertAction) error {
+	// Use custom webhook URL if provided in action
+	webhookURL := n.webhookURL
+	if url, ok := action.Config["webhook_url"].(string); ok && url != "" {
+		webhookURL = url
+	}
+
+	color := n.getColor(alert.Severity)
+
+	payload := map[string]interface{}{
+		"attachments": []map[string]interface{}{
+			{
+				"color":      color,
+				"title":      alert.Title,
+				"text":       alert.Message,
+				"footer":     "StreamLine Alerts",
+				"ts":         alert.FiredAt.Unix(),
+				"fields": []map[string]interface{}{
+					{"title": "Severity", "value": string(alert.Severity), "short": true},
+					{"title": "Type", "value": string(alert.Type), "short": true},
+					{"title": "Channel", "value": alert.ChannelID, "short": true},
+					{"title": "Product", "value": alert.ProductSKU, "short": true},
+				},
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("slack API error: %s - %s", resp.Status, string(body))
+	}
+
+	return nil
+}
+
+func (n *SlackNotifier) getColor(severity AlertSeverity) string {
+	switch severity {
+	case SeverityCritical:
+		return "#FF0000"
+	case SeverityHigh:
+		return "#FF6600"
+	case SeverityMedium:
+		return "#FFCC00"
+	case SeverityLow:
+		return "#00CC00"
+	default:
+		return "#0066FF"
+	}
+}
+
+// EmailNotifier sends alerts via email
+type EmailNotifier struct {
+	smtpHost string
+	smtpPort string
+	username string
+	password string
+	from     string
+}
+
+// NewEmailNotifier creates a new email notifier
+func NewEmailNotifier(host, port, username, password, from string) *EmailNotifier {
+	return &EmailNotifier{
+		smtpHost: host,
+		smtpPort: port,
+		username: username,
+		password: password,
+		from:     from,
+	}
+}
+
+func (n *EmailNotifier) Type() ActionType {
+	return ActionTypeEmail
+}
+
+func (n *EmailNotifier) Send(ctx context.Context, alert *Alert, action AlertAction) error {
+	to := action.Target
+	if to == "" {
+		if emails, ok := action.Config["recipients"].([]string); ok && len(emails) > 0 {
+			to = strings.Join(emails, ",")
+		}
+	}
+
+	if to == "" {
+		return fmt.Errorf("no email recipients specified")
+	}
+
+	subject := fmt.Sprintf("[%s] %s", alert.Severity, alert.Title)
+	body := n.formatEmailBody(alert)
+
+	msg := []byte(fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		n.from, to, subject, body))
+
+	auth := smtp.PlainAuth("", n.username, n.password, n.smtpHost)
+	err := smtp.SendMail(n.smtpHost+":"+n.smtpPort, auth, n.from, strings.Split(to, ","), msg)
+	return err
+}
+
+func (n *EmailNotifier) formatEmailBody(alert *Alert) string {
+	return fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .alert-box { border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+        .severity-critical { border-left: 4px solid #FF0000; }
+        .severity-high { border-left: 4px solid #FF6600; }
+        .severity-medium { border-left: 4px solid #FFCC00; }
+        .severity-low { border-left: 4px solid #00CC00; }
+        .title { font-size: 18px; font-weight: bold; margin-bottom: 10px; }
+        .message { color: #555; margin-bottom: 15px; }
+        .details { background: #f5f5f5; padding: 10px; border-radius: 4px; }
+        .detail-row { margin: 5px 0; }
+        .label { font-weight: bold; color: #333; }
+    </style>
+</head>
+<body>
+    <div class="alert-box severity-%s">
+        <div class="title">%s</div>
+        <div class="message">%s</div>
+        <div class="details">
+            <div class="detail-row"><span class="label">Type:</span> %s</div>
+            <div class="detail-row"><span class="label">Severity:</span> %s</div>
+            <div class="detail-row"><span class="label">Channel:</span> %s</div>
+            <div class="detail-row"><span class="label">Product SKU:</span> %s</div>
+            <div class="detail-row"><span class="label">Time:</span> %s</div>
+        </div>
+    </div>
+    <p style="color: #888; font-size: 12px;">This alert was generated by StreamLine Inventory Management.</p>
+</body>
+</html>
+`, alert.Severity, alert.Title, alert.Message, alert.Type, alert.Severity,
+   alert.ChannelID, alert.ProductSKU, alert.FiredAt.Format(time.RFC3339))
+}
+
+// WebhookNotifier sends alerts to custom webhooks
+type WebhookNotifier struct {
+	client *http.Client
+}
+
+// NewWebhookNotifier creates a new webhook notifier
+func NewWebhookNotifier() *WebhookNotifier {
+	return &WebhookNotifier{
+		client: &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (n *WebhookNotifier) Type() ActionType {
+	return ActionTypeWebhook
+}
+
+func (n *WebhookNotifier) Send(ctx context.Context, alert *Alert, action AlertAction) error {
+	webhookURL := action.Target
+	if webhookURL == "" {
+		if url, ok := action.Config["url"].(string); ok {
+			webhookURL = url
+		}
+	}
+
+	if webhookURL == "" {
+		return fmt.Errorf("no webhook URL specified")
+	}
+
+	payload := map[string]interface{}{
+		"id":           alert.ID,
+		"rule_id":      alert.RuleID,
+		"rule_name":    alert.RuleName,
+		"type":         alert.Type,
+		"severity":     alert.Severity,
+		"title":        alert.Title,
+		"message":      alert.Message,
+		"channel_id":   alert.ChannelID,
+		"product_id":   alert.ProductID,
+		"product_sku":  alert.ProductSKU,
+		"data":         alert.Data,
+		"fired_at":     alert.FiredAt.Format(time.RFC3339),
+		"source":       "streamline",
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Add custom headers if specified
+	if headers, ok := action.Config["headers"].(map[string]string); ok {
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+	}
+
+	// Add auth header if specified
+	if authHeader, ok := action.Config["auth_header"].(string); ok {
+		req.Header.Set("Authorization", authHeader)
+	}
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("webhook error: %s - %s", resp.Status, string(body))
+	}
+
+	return nil
+}
+
+// TeamsNotifier sends alerts to Microsoft Teams
+type TeamsNotifier struct {
+	webhookURL string
+	client     *http.Client
+}
+
+// NewTeamsNotifier creates a new Teams notifier
+func NewTeamsNotifier(webhookURL string) *TeamsNotifier {
+	return &TeamsNotifier{
+		webhookURL: webhookURL,
+		client:     &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (n *TeamsNotifier) Type() ActionType {
+	return ActionTypeTeams
+}
+
+func (n *TeamsNotifier) Send(ctx context.Context, alert *Alert, action AlertAction) error {
+	webhookURL := n.webhookURL
+	if url, ok := action.Config["webhook_url"].(string); ok && url != "" {
+		webhookURL = url
+	}
+
+	color := n.getColor(alert.Severity)
+
+	payload := map[string]interface{}{
+		"@type":      "MessageCard",
+		"@context":   "http://schema.org/extensions",
+		"themeColor": color,
+		"summary":    alert.Title,
+		"sections": []map[string]interface{}{
+			{
+				"activityTitle": alert.Title,
+				"facts": []map[string]string{
+					{"name": "Severity", "value": string(alert.Severity)},
+					{"name": "Type", "value": string(alert.Type)},
+					{"name": "Channel", "value": alert.ChannelID},
+					{"name": "Product SKU", "value": alert.ProductSKU},
+					{"name": "Time", "value": alert.FiredAt.Format(time.RFC3339)},
+				},
+				"markdown": true,
+				"text":     alert.Message,
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("teams API error: %s - %s", resp.Status, string(body))
+	}
+
+	return nil
+}
+
+func (n *TeamsNotifier) getColor(severity AlertSeverity) string {
+	switch severity {
+	case SeverityCritical:
+		return "FF0000"
+	case SeverityHigh:
+		return "FF6600"
+	case SeverityMedium:
+		return "FFCC00"
+	case SeverityLow:
+		return "00CC00"
+	default:
+		return "0066FF"
+	}
+}
+
+// DiscordNotifier sends alerts to Discord
+type DiscordNotifier struct {
+	webhookURL string
+	client     *http.Client
+}
+
+// NewDiscordNotifier creates a new Discord notifier
+func NewDiscordNotifier(webhookURL string) *DiscordNotifier {
+	return &DiscordNotifier{
+		webhookURL: webhookURL,
+		client:     &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (n *DiscordNotifier) Type() ActionType {
+	return ActionTypeDiscord
+}
+
+func (n *DiscordNotifier) Send(ctx context.Context, alert *Alert, action AlertAction) error {
+	webhookURL := n.webhookURL
+	if url, ok := action.Config["webhook_url"].(string); ok && url != "" {
+		webhookURL = url
+	}
+
+	color := n.getColor(alert.Severity)
+
+	payload := map[string]interface{}{
+		"embeds": []map[string]interface{}{
+			{
+				"title":       alert.Title,
+				"description": alert.Message,
+				"color":       color,
+				"fields": []map[string]interface{}{
+					{"name": "Severity", "value": string(alert.Severity), "inline": true},
+					{"name": "Type", "value": string(alert.Type), "inline": true},
+					{"name": "Channel", "value": alert.ChannelID, "inline": true},
+					{"name": "Product SKU", "value": alert.ProductSKU, "inline": true},
+				},
+				"footer": map[string]string{
+					"text": "StreamLine Alerts",
+				},
+				"timestamp": alert.FiredAt.Format(time.RFC3339),
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", webhookURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("discord API error: %s - %s", resp.Status, string(body))
+	}
+
+	return nil
+}
+
+func (n *DiscordNotifier) getColor(severity AlertSeverity) int {
+	switch severity {
+	case SeverityCritical:
+		return 0xFF0000
+	case SeverityHigh:
+		return 0xFF6600
+	case SeverityMedium:
+		return 0xFFCC00
+	case SeverityLow:
+		return 0x00CC00
+	default:
+		return 0x0066FF
+	}
+}
+
+// PagerDutyNotifier sends alerts to PagerDuty
+type PagerDutyNotifier struct {
+	routingKey string
+	client     *http.Client
+}
+
+// NewPagerDutyNotifier creates a new PagerDuty notifier
+func NewPagerDutyNotifier(routingKey string) *PagerDutyNotifier {
+	return &PagerDutyNotifier{
+		routingKey: routingKey,
+		client:     &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (n *PagerDutyNotifier) Type() ActionType {
+	return ActionTypePagerDuty
+}
+
+func (n *PagerDutyNotifier) Send(ctx context.Context, alert *Alert, action AlertAction) error {
+	routingKey := n.routingKey
+	if key, ok := action.Config["routing_key"].(string); ok && key != "" {
+		routingKey = key
+	}
+
+	severity := n.mapSeverity(alert.Severity)
+
+	payload := map[string]interface{}{
+		"routing_key":  routingKey,
+		"event_action": "trigger",
+		"dedup_key":    alert.ID,
+		"payload": map[string]interface{}{
+			"summary":   alert.Title,
+			"source":    "streamline",
+			"severity":  severity,
+			"timestamp": alert.FiredAt.Format(time.RFC3339),
+			"component": alert.ChannelID,
+			"class":     string(alert.Type),
+			"custom_details": map[string]interface{}{
+				"message":     alert.Message,
+				"product_id":  alert.ProductID,
+				"product_sku": alert.ProductSKU,
+				"channel_id":  alert.ChannelID,
+				"data":        alert.Data,
+			},
+		},
+	}
+
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://events.pagerduty.com/v2/enqueue", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("pagerduty API error: %s - %s", resp.Status, string(body))
+	}
+
+	return nil
+}
+
+func (n *PagerDutyNotifier) mapSeverity(severity AlertSeverity) string {
+	switch severity {
+	case SeverityCritical:
+		return "critical"
+	case SeverityHigh:
+		return "error"
+	case SeverityMedium:
+		return "warning"
+	case SeverityLow:
+		return "info"
+	default:
+		return "info"
+	}
+}
+
+// SMSNotifier sends alerts via SMS (using Twilio)
+type SMSNotifier struct {
+	accountSID string
+	authToken  string
+	fromNumber string
+	client     *http.Client
+}
+
+// NewSMSNotifier creates a new SMS notifier
+func NewSMSNotifier(accountSID, authToken, fromNumber string) *SMSNotifier {
+	return &SMSNotifier{
+		accountSID: accountSID,
+		authToken:  authToken,
+		fromNumber: fromNumber,
+		client:     &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+func (n *SMSNotifier) Type() ActionType {
+	return ActionTypeSMS
+}
+
+func (n *SMSNotifier) Send(ctx context.Context, alert *Alert, action AlertAction) error {
+	toNumber := action.Target
+	if toNumber == "" {
+		if phone, ok := action.Config["phone"].(string); ok {
+			toNumber = phone
+		}
+	}
+
+	if toNumber == "" {
+		return fmt.Errorf("no phone number specified")
+	}
+
+	message := fmt.Sprintf("[%s] %s\n%s", alert.Severity, alert.Title, alert.Message)
+	if len(message) > 160 {
+		message = message[:157] + "..."
+	}
+
+	url := fmt.Sprintf("https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json", n.accountSID)
+
+	data := strings.NewReader(fmt.Sprintf("To=%s&From=%s&Body=%s", toNumber, n.fromNumber, message))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, data)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth(n.accountSID, n.authToken)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("twilio API error: %s - %s", resp.Status, string(body))
+	}
+
+	return nil
+}
