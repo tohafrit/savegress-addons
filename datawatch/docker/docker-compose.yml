@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  datawatch:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "3002:3002"
+    environment:
+      - ENVIRONMENT=development
+      - JWT_SECRET=dev-secret-change-in-production
+      - DATABASE_URL=postgres://datawatch:datawatch@postgres:5432/datawatch
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - datawatch-data:/var/lib/datawatch/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=datawatch
+      - POSTGRES_PASSWORD=datawatch
+      - POSTGRES_DB=datawatch
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U datawatch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  datawatch-data:
+  postgres-data:
+  redis-data:

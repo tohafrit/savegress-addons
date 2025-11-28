@@ -1,0 +1,51 @@
+server:
+  port: 3002
+  environment: ${ENVIRONMENT:-production}
+  jwt_secret: ${JWT_SECRET}
+
+database:
+  url: ${DATABASE_URL:-postgres://datawatch:datawatch@postgres:5432/datawatch}
+  max_conns: 25
+  min_conns: 5
+
+redis:
+  url: ${REDIS_URL:-redis://redis:6379}
+
+metrics:
+  auto_discover: true
+  retention: 720h  # 30 days
+  storage: embedded
+
+anomaly:
+  enabled: true
+  algorithms:
+    - statistical
+    - seasonal
+  sensitivity: medium
+  baseline_window: 168h  # 7 days
+
+quality:
+  enabled: true
+  default_rules: true
+  score_threshold: 90
+
+schema:
+  track_changes: true
+  alert_on_breaking: true
+
+alerts:
+  evaluation_interval: 1m
+  channels:
+    slack:
+      webhook_url: ${SLACK_WEBHOOK_URL}
+      channel: "#datawatch-alerts"
+    email:
+      smtp_host: ${SMTP_HOST}
+      smtp_port: ${SMTP_PORT:-587}
+      from: ${SMTP_FROM:-alerts@datawatch.local}
+      username: ${SMTP_USERNAME}
+      password: ${SMTP_PASSWORD}
+
+storage:
+  embedded:
+    path: /var/lib/datawatch/data

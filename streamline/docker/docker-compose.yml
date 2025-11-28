@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  streamline:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      - ENVIRONMENT=development
+      - JWT_SECRET=dev-secret-change-in-production
+      - DATABASE_URL=postgres://streamline:streamline@postgres:5432/streamline
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=streamline
+      - POSTGRES_PASSWORD=streamline
+      - POSTGRES_DB=streamline
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streamline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  redis-data:
