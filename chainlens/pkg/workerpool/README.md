@@ -1,7 +1,7 @@
 # Worker Pool - Production-Grade Concurrency Library for Go
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/chainlens/chainlens/pkg/workerpool.svg)](https://pkg.go.dev/github.com/chainlens/chainlens/pkg/workerpool)
-[![Go Report Card](https://goreportcard.com/badge/github.com/chainlens/chainlens/pkg/workerpool)](https://goreportcard.com/report/github.com/chainlens/chainlens/pkg/workerpool)
+[![Go Reference](https://pkg.go.dev/badge/getchainlens.com/chainlens/pkg/workerpool.svg)](https://pkg.go.dev/getchainlens.com/chainlens/pkg/workerpool)
+[![Go Report Card](https://goreportcard.com/badge/getchainlens.com/chainlens/pkg/workerpool)](https://goreportcard.com/report/getchainlens.com/chainlens/pkg/workerpool)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A production-ready, high-performance worker pool implementation for Go that provides controlled concurrency, graceful shutdown, comprehensive monitoring, and robust error handling.
@@ -21,7 +21,7 @@ A production-ready, high-performance worker pool implementation for Go that prov
 ## Installation
 
 ```bash
-go get github.com/chainlens/chainlens/pkg/workerpool
+go get getchainlens.com/chainlens/pkg/workerpool
 ```
 
 ## Quick Start
@@ -34,7 +34,7 @@ import (
     "log"
     "time"
 
-    "github.com/chainlens/chainlens/pkg/workerpool"
+    "getchainlens.com/chainlens/pkg/workerpool"
 )
 
 func main() {
@@ -422,6 +422,6 @@ Inspired by production-grade worker pool patterns and best practices from:
 
 ## Support
 
-- 📚 [Documentation](https://pkg.go.dev/github.com/chainlens/chainlens/pkg/workerpool)
-- 🐛 [Issue Tracker](https://github.com/chainlens/chainlens/pkg/workerpool/issues)
-- 💬 [Discussions](https://github.com/chainlens/chainlens/pkg/workerpool/discussions)
+- [Documentation](https://pkg.go.dev/getchainlens.com/chainlens/pkg/workerpool)
+- [Issue Tracker](https://github.com/getchainlens/chainlens/issues)
+- [Discussions](https://github.com/getchainlens/chainlens/discussions)

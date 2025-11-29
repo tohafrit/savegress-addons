@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/config"
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/cost"
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/dashboard"
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/multitenancy"
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/observability"
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/persistence"
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/resilience"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/config"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/cost"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/dashboard"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/multitenancy"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/observability"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/persistence"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/resilience"
 )
 
 // Enterprise components (embedded in WorkerPool)

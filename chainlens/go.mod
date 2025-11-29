@@ -1,4 +1,4 @@
-module github.com/chainlens/chainlens
+module getchainlens.com/chainlens
 
 go 1.23
 
@@ -18,6 +18,3 @@ require (
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 )
-
-// Worker pool is now internal
-// Use: github.com/chainlens/chainlens/pkg/workerpool

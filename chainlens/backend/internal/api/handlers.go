@@ -15,11 +15,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/chainlens/chainlens/backend/internal/analyzer"
-	"github.com/chainlens/chainlens/backend/internal/billing"
-	"github.com/chainlens/chainlens/backend/internal/config"
-	"github.com/chainlens/chainlens/backend/internal/database"
-	"github.com/chainlens/chainlens/backend/internal/tracer"
+	"getchainlens.com/chainlens/backend/internal/analyzer"
+	"getchainlens.com/chainlens/backend/internal/billing"
+	"getchainlens.com/chainlens/backend/internal/config"
+	"getchainlens.com/chainlens/backend/internal/database"
+	"getchainlens.com/chainlens/backend/internal/tracer"
 )
 
 // Response helpers
@@ -543,7 +543,7 @@ func handleCreateFork(cfg *config.Config, db *database.DB) http.HandlerFunc {
 
 		respondJSON(w, http.StatusOK, map[string]interface{}{
 			"fork_id":      forkID,
-			"rpc_url":      fmt.Sprintf("https://fork.chainlens.dev/%s", forkID),
+			"rpc_url":      fmt.Sprintf("https://fork.getchainlens.com/%s", forkID),
 			"chain":        req.Chain,
 			"block_number": req.BlockNumber,
 			"expires_at":   time.Now().Add(1 * time.Hour).Format(time.RFC3339),

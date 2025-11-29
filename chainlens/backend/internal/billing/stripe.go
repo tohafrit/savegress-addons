@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainlens/chainlens/backend/internal/config"
-	"github.com/chainlens/chainlens/backend/internal/database"
+	"getchainlens.com/chainlens/backend/internal/config"
+	"getchainlens.com/chainlens/backend/internal/database"
 )
 
 // Price IDs for subscription plans

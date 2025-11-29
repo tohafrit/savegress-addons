@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainlens/chainlens/backend/internal/monitor"
+	"getchainlens.com/chainlens/backend/internal/monitor"
 )
 
 // MultiChainIndexer indexes multiple blockchain networks

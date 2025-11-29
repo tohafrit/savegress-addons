@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/chainlens/chainlens/backend/internal/api"
-	"github.com/chainlens/chainlens/backend/internal/config"
-	"github.com/chainlens/chainlens/backend/internal/database"
+	"getchainlens.com/chainlens/backend/internal/api"
+	"getchainlens.com/chainlens/backend/internal/config"
+	"getchainlens.com/chainlens/backend/internal/database"
 )
 
 func main() {

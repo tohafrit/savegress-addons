@@ -45,7 +45,7 @@ chainlens/
 ChainLens is powered by a production-grade worker pool engine with enterprise features:
 
 ```go
-import "github.com/chainlens/chainlens/pkg/workerpool"
+import "getchainlens.com/chainlens/pkg/workerpool"
 
 // Create pool with enterprise features
 pool, _ := workerpool.NewWorkerPool(workerpool.Config{
@@ -90,7 +90,7 @@ pool.Submit(func() error {
 
 ```bash
 # Clone the repository
-git clone https://github.com/chainlens/chainlens.git
+git clone https://github.com/getchainlens/chainlens.git
 cd chainlens
 
 # Start infrastructure
@@ -296,7 +296,7 @@ MIT License - see [LICENSE](LICENSE)
 Built with ❤️ by the ChainLens team
 
 **Links:**
-- Website: https://chainlens.dev
-- Docs: https://docs.chainlens.dev
+- Website: https://getchainlens.com
+- Docs: https://docs.getchainlens.com
 - Discord: https://discord.gg/chainlens
-- Twitter: https://twitter.com/chainlens
+- Twitter: https://twitter.com/getchainlens

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainlens/chainlens/pkg/workerpool"
+	"getchainlens.com/chainlens/pkg/workerpool"
 )
 
 // Severity levels for security issues

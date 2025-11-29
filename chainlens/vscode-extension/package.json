@@ -7,11 +7,11 @@
   "icon": "images/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chainlens/chainlens"
+    "url": "https://github.com/getchainlens/chainlens"
   },
-  "homepage": "https://chainlens.dev",
+  "homepage": "https://getchainlens.com",
   "bugs": {
-    "url": "https://github.com/chainlens/chainlens/issues"
+    "url": "https://github.com/getchainlens/chainlens/issues"
   },
   "license": "MIT",
   "engines": {

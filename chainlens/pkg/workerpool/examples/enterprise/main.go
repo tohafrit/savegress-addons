@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/chainlens/chainlens/pkg/workerpool"
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/dashboard"
-	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/observability"
+	"getchainlens.com/chainlens/pkg/workerpool"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/dashboard"
+	"getchainlens.com/chainlens/pkg/workerpool/enterprise/observability"
 )
 
 func main() {

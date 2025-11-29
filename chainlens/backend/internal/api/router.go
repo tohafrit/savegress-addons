@@ -8,8 +8,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"github.com/chainlens/chainlens/backend/internal/config"
-	"github.com/chainlens/chainlens/backend/internal/database"
+	"getchainlens.com/chainlens/backend/internal/config"
+	"getchainlens.com/chainlens/backend/internal/database"
 )
 
 func NewRouter(cfg *config.Config, db *database.DB) *chi.Mux {
@@ -24,7 +24,7 @@ func NewRouter(cfg *config.Config, db *database.DB) *chi.Mux {
 
 	// CORS
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:3000", "https://chainlens.dev", "https://*.chainlens.dev"},
+		AllowedOrigins:   []string{"http://localhost:3000", "https://getchainlens.com", "https://*.getchainlens.com"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link"},

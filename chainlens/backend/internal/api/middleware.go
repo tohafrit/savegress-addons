@@ -10,8 +10,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/chainlens/chainlens/backend/internal/config"
-	"github.com/chainlens/chainlens/backend/internal/database"
+	"getchainlens.com/chainlens/backend/internal/config"
+	"getchainlens.com/chainlens/backend/internal/database"
 )
 
 // AuthMiddleware validates JWT tokens
@@ -244,7 +244,7 @@ func UsageTrackingMiddleware(db *database.DB) func(http.Handler) http.Handler {
 				_ = db.TrackAPIUsage(ctx, userID, r.URL.Path, r.Method, rw.statusCode, duration.Milliseconds())
 
 				// Increment user's API call count
-				_ = db.IncrementAPIUsage(ctx, userID)
+				_, _ = db.IncrementAPIUsage(ctx, userID)
 			}()
 		})
 	}
