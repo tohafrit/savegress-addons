@@ -1,4 +1,8 @@
-.PHONY: help dev-infra dev-backend dev-vscode dev-frontend docker-up docker-down docker-logs build test clean
+.PHONY: help dev-infra dev-backend dev-vscode dev-frontend docker-up docker-down docker-logs build test clean deploy
+
+# Server configuration
+PROD_SERVER=infra@91.98.233.25
+PROD_DIR=/home/infra/chainlens
 
 # Default target
 help:
@@ -14,6 +18,12 @@ help:
 	@echo "  make docker-up      - Start all services with Docker"
 	@echo "  make docker-down    - Stop all Docker services"
 	@echo "  make docker-logs    - View Docker logs"
+	@echo ""
+	@echo "Production:"
+	@echo "  make deploy         - Deploy to production server"
+	@echo "  make prod-up        - Start production services (on server)"
+	@echo "  make prod-down      - Stop production services (on server)"
+	@echo "  make prod-logs      - View production logs (on server)"
 	@echo ""
 	@echo "Build:"
 	@echo "  make build          - Build all components"
@@ -115,3 +125,29 @@ lint-vscode:
 fmt:
 	cd backend && go fmt ./...
 	cd vscode-extension && npm run lint -- --fix
+
+# Production deployment
+deploy:
+	@echo "Deploying to production server..."
+	ssh $(PROD_SERVER) "mkdir -p $(PROD_DIR)"
+	rsync -avz --exclude='.git' --exclude='node_modules' --exclude='.next' --exclude='bin' --exclude='out' \
+		--exclude='cover.out' --exclude='*.vsix' \
+		./ $(PROD_SERVER):$(PROD_DIR)/
+	ssh $(PROD_SERVER) "cd $(PROD_DIR)/docker && docker compose -f docker-compose.prod.yml build"
+	ssh $(PROD_SERVER) "cd $(PROD_DIR)/docker && docker compose -f docker-compose.prod.yml up -d"
+	@echo "Deployment complete!"
+
+prod-up:
+	ssh $(PROD_SERVER) "cd $(PROD_DIR)/docker && docker compose -f docker-compose.prod.yml up -d"
+
+prod-down:
+	ssh $(PROD_SERVER) "cd $(PROD_DIR)/docker && docker compose -f docker-compose.prod.yml down"
+
+prod-logs:
+	ssh $(PROD_SERVER) "cd $(PROD_DIR)/docker && docker compose -f docker-compose.prod.yml logs -f"
+
+prod-status:
+	ssh $(PROD_SERVER) "cd $(PROD_DIR)/docker && docker compose -f docker-compose.prod.yml ps"
+
+prod-rebuild:
+	ssh $(PROD_SERVER) "cd $(PROD_DIR)/docker && docker compose -f docker-compose.prod.yml build --no-cache && docker compose -f docker-compose.prod.yml up -d"

@@ -47,4 +47,15 @@ tmp/
 temp/
 
 # Node
-*node_modules/
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Build outputs
+dist/
+build/
+
+# VS Code Extension
+*.vsix
