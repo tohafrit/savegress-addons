@@ -229,14 +229,205 @@ func (a *Analyzer) Stats() workerpool.Stats {
 	return a.pool.Stats()
 }
 
-// analyzeGas performs gas estimation
+// analyzeGas performs gas estimation by analyzing Solidity source code
 func analyzeGas(source string) map[string]GasEstimate {
 	estimates := make(map[string]GasEstimate)
+	lines := splitLines(source)
 
-	// TODO: Implement proper gas analysis using AST
-	// For now, return placeholder
+	// Track current function context
+	var currentFunction string
+	var functionBraces int
+	var functionGas gasAccumulator
+
+	for _, line := range lines {
+		trimmed := trimSpace(line)
+
+		// Detect function declaration
+		if contains(trimmed, "function ") && (contains(trimmed, "public") || contains(trimmed, "external")) {
+			// Extract function name
+			start := findSubstring(trimmed, "function ") + 9
+			end := start
+			for end < len(trimmed) && trimmed[end] != '(' && trimmed[end] != ' ' {
+				end++
+			}
+			if end > start {
+				currentFunction = trimmed[start:end]
+				functionBraces = countChar(line, '{') - countChar(line, '}')
+				functionGas = gasAccumulator{}
+			}
+			continue
+		}
+
+		// Track braces for function scope
+		if currentFunction != "" {
+			functionBraces += countChar(line, '{') - countChar(line, '}')
+
+			// Analyze gas costs within function
+			analyzeLineGas(trimmed, &functionGas)
+
+			// Function ended
+			if functionBraces <= 0 {
+				estimates[currentFunction] = calculateFunctionGas(functionGas)
+				currentFunction = ""
+			}
+		}
+	}
 
 	return estimates
+}
+
+// gasAccumulator tracks gas costs during analysis
+type gasAccumulator struct {
+	storageReads   int
+	storageWrites  int
+	externalCalls  int
+	memoryOps      int
+	loops          int
+	conditionals   int
+	eventEmits     int
+	mappingAccess  int
+	arrayOps       int
+	stringOps      int
+}
+
+// analyzeLineGas analyzes a line for gas-consuming operations
+func analyzeLineGas(line string, gas *gasAccumulator) {
+	// Storage reads (state variable access)
+	if contains(line, "storage") || (contains(line, "=") && !contains(line, "memory") && !contains(line, "calldata")) {
+		if contains(line, "=") && !contains(line, "==") {
+			gas.storageWrites++
+		} else {
+			gas.storageReads++
+		}
+	}
+
+	// External calls
+	if contains(line, ".call") || contains(line, ".transfer") || contains(line, ".send") {
+		gas.externalCalls++
+	}
+
+	// Contract calls
+	if contains(line, "(") && contains(line, ")") && !contains(line, "function") && !contains(line, "if") && !contains(line, "require") {
+		if contains(line, ".") {
+			gas.externalCalls++
+		}
+	}
+
+	// Memory operations
+	if contains(line, "memory") || contains(line, "new ") {
+		gas.memoryOps++
+	}
+
+	// Loops
+	if contains(line, "for") || contains(line, "while") {
+		gas.loops++
+	}
+
+	// Conditionals
+	if contains(line, "if") || contains(line, "require") || contains(line, "assert") {
+		gas.conditionals++
+	}
+
+	// Events
+	if contains(line, "emit ") {
+		gas.eventEmits++
+	}
+
+	// Mapping access
+	if contains(line, "[") && contains(line, "]") {
+		gas.mappingAccess++
+	}
+
+	// Array operations
+	if contains(line, ".push") || contains(line, ".pop") || contains(line, ".length") {
+		gas.arrayOps++
+	}
+
+	// String operations
+	if contains(line, "string") && (contains(line, "concat") || contains(line, "bytes(")) {
+		gas.stringOps++
+	}
+}
+
+// calculateFunctionGas calculates gas estimate for a function
+func calculateFunctionGas(gas gasAccumulator) GasEstimate {
+	// Base gas costs (approximate values for EVM)
+	const (
+		baseGas            = 21000 // Transaction base cost
+		sloadGas           = 2100  // Cold storage read
+		sstoreGas          = 20000 // Storage write (new value)
+		callGas            = 2600  // External call base
+		memoryGas          = 3     // Per word
+		loopOverhead       = 100   // Loop iteration overhead
+		conditionalGas     = 10    // Jump cost
+		eventGas           = 375   // Base log cost
+		mappingGas         = 200   // Mapping hash computation
+		arrayGas           = 100   // Array operation overhead
+		stringGas          = 200   // String operation overhead
+	)
+
+	minGas := uint64(baseGas)
+	minGas += uint64(gas.storageReads) * sloadGas
+	minGas += uint64(gas.storageWrites) * sstoreGas
+	minGas += uint64(gas.externalCalls) * callGas
+	minGas += uint64(gas.memoryOps) * memoryGas * 32 // Assume 32 bytes per op
+	minGas += uint64(gas.conditionals) * conditionalGas
+	minGas += uint64(gas.eventEmits) * eventGas
+	minGas += uint64(gas.mappingAccess) * mappingGas
+	minGas += uint64(gas.arrayOps) * arrayGas
+	minGas += uint64(gas.stringOps) * stringGas
+
+	// Calculate typical (add loop overhead with average iterations)
+	typicalGas := minGas
+	if gas.loops > 0 {
+		typicalGas += uint64(gas.loops) * loopOverhead * 10 // Assume ~10 iterations
+	}
+
+	// Calculate max (worst case with more loop iterations)
+	maxGas := minGas
+	if gas.loops > 0 {
+		maxGas += uint64(gas.loops) * loopOverhead * 100 // Assume ~100 iterations worst case
+	}
+
+	// Add 20% buffer for max
+	maxGas = maxGas * 120 / 100
+
+	// Determine level
+	level := "low"
+	if typicalGas > 100000 {
+		level = "high"
+	} else if typicalGas > 50000 {
+		level = "medium"
+	}
+
+	return GasEstimate{
+		Min:     minGas,
+		Max:     maxGas,
+		Typical: typicalGas,
+		Level:   level,
+	}
+}
+
+func trimSpace(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
+		end--
+	}
+	return s[start:end]
+}
+
+func countChar(s string, c byte) int {
+	count := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			count++
+		}
+	}
+	return count
 }
 
 // calculateScore calculates security/quality scores
@@ -258,10 +449,42 @@ func calculateScore(issues []Issue, gas map[string]GasEstimate) Score {
 		securityScore = 0
 	}
 
+	// Calculate gas efficiency score
+	gasScore := 100
+	highGasFunctions := 0
+	mediumGasFunctions := 0
+	for _, estimate := range gas {
+		switch estimate.Level {
+		case "high":
+			highGasFunctions++
+		case "medium":
+			mediumGasFunctions++
+		}
+	}
+	gasScore -= highGasFunctions * 15
+	gasScore -= mediumGasFunctions * 5
+	if gasScore < 0 {
+		gasScore = 0
+	}
+
+	// Calculate code quality score based on patterns
+	codeQuality := 100
+	// Deduct for critical/high issues as they indicate quality problems
+	criticalCount := 0
+	for _, issue := range issues {
+		if issue.Severity == SeverityCritical || issue.Severity == SeverityHigh {
+			criticalCount++
+		}
+	}
+	codeQuality -= criticalCount * 10
+	if codeQuality < 0 {
+		codeQuality = 0
+	}
+
 	return Score{
 		Security:      securityScore,
-		GasEfficiency: 80, // TODO: Calculate from gas estimates
-		CodeQuality:   75, // TODO: Calculate from patterns
+		GasEfficiency: gasScore,
+		CodeQuality:   codeQuality,
 	}
 }
 

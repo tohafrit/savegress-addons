@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tohafrit/worker-pool/workerpool/enterprise/config"
-	"github.com/tohafrit/worker-pool/workerpool/enterprise/cost"
-	"github.com/tohafrit/worker-pool/workerpool/enterprise/dashboard"
-	"github.com/tohafrit/worker-pool/workerpool/enterprise/multitenancy"
-	"github.com/tohafrit/worker-pool/workerpool/enterprise/observability"
-	"github.com/tohafrit/worker-pool/workerpool/enterprise/persistence"
-	"github.com/tohafrit/worker-pool/workerpool/enterprise/resilience"
+	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/config"
+	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/cost"
+	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/dashboard"
+	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/multitenancy"
+	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/observability"
+	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/persistence"
+	"github.com/chainlens/chainlens/pkg/workerpool/enterprise/resilience"
 )
 
 // Enterprise components (embedded in WorkerPool)

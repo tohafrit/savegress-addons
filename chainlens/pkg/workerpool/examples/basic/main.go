@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/yourusername/workerpool"
+	"github.com/chainlens/chainlens/pkg/workerpool"
 )
 
 func main() {

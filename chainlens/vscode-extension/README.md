@@ -4,6 +4,8 @@
 
 ChainLens provides real-time security analysis, gas estimation, and debugging capabilities for Solidity smart contracts directly in VS Code.
 
+![ChainLens Demo](images/demo.gif)
+
 ## Features
 
 ### 🔒 Security Analysis

@@ -46,7 +46,7 @@ export class SecurityAnalyzer {
             });
 
             for (const pattern of this.patterns) {
-                const patternIssues = pattern.check(ast, sourceCode);
+                const patternIssues = pattern.check(ast as unknown as ASTNode, sourceCode);
                 issues.push(...patternIssues);
             }
         } catch (error) {
@@ -263,8 +263,8 @@ class IntegerOverflowPattern implements SecurityPattern {
 
                     // Find arithmetic operations
                     lines.forEach((line, index) => {
-                        if (line.match(/[\+\-\*](?!=)/) && !line.trim().startsWith('//') && !line.includes('pragma')) {
-                            const hasArithmetic = line.match(/\w+\s*[\+\-\*\/]\s*\w+/);
+                        if (line.match(/[+\-*](?!=)/) && !line.trim().startsWith('//') && !line.includes('pragma')) {
+                            const hasArithmetic = line.match(/\w+\s*[+\-*/]\s*\w+/);
                             if (hasArithmetic) {
                                 issues.push({
                                     type: 'INTEGER_OVERFLOW',

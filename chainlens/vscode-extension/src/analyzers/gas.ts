@@ -52,7 +52,7 @@ export class GasAnalyzer {
                 tolerant: true,
             });
 
-            this.visitNode(ast, (node) => {
+            this.visitNode(ast as unknown as ASTNode, (node) => {
                 if (node.type === 'FunctionDefinition') {
                     const estimate = this.estimateFunction(node, sourceCode);
                     if (estimate) {
@@ -135,7 +135,7 @@ export class GasAnalyzer {
             const paramList = params.parameters as ASTNode[];
             for (const param of paramList) {
                 const typeName = param.typeName as ASTNode;
-                if (typeName?.name === 'string' || typeName?.baseTypeName?.name === 'bytes') {
+                if ((typeName as ASTNode & {name?: string})?.name === 'string' || ((typeName as ASTNode)?.baseTypeName as ASTNode & {name?: string})?.name === 'bytes') {
                     suggestions.push('Using dynamic types (string/bytes) in parameters increases gas. Consider bytes32 if possible.');
                 }
             }
@@ -282,7 +282,7 @@ export class GasAnalyzer {
 
             if (inFunction) {
                 // Storage operations
-                if (line.match(/\w+\s*[+\-*\/]?=\s*/) && !line.includes('memory') && !line.includes('//')) {
+                if (line.match(/\w+\s*[+\-*/]?=\s*/) && !line.includes('memory') && !line.includes('//')) {
                     gasEstimate += GAS_COSTS.SSTORE_UPDATE;
                 }
 

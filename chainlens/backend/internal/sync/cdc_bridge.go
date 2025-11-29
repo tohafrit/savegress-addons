@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainlens/chainlens/internal/monitor"
+	"github.com/chainlens/chainlens/backend/internal/monitor"
 )
 
 // CDCBridge bridges on-chain events to off-chain databases via Savegress CDC
