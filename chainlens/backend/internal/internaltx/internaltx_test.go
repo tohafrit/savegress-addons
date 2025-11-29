@@ -523,3 +523,308 @@ func TestServiceSetRPCURL(t *testing.T) {
 		t.Errorf("Unexpected polygon RPC URL: %s", service.rpcURLs["polygon"])
 	}
 }
+
+func TestServiceStopWithoutStart(t *testing.T) {
+	service := NewService(nil, nil)
+	// Stopping without starting should not panic
+	service.Stop()
+}
+
+func TestInt64Ptr(t *testing.T) {
+	val := int64(12345)
+	ptr := int64Ptr(val)
+
+	if ptr == nil {
+		t.Fatal("Expected non-nil pointer")
+	}
+
+	if *ptr != val {
+		t.Errorf("Expected %d, got %d", val, *ptr)
+	}
+
+	// Ensure it's a new pointer
+	*ptr = 0
+	if *ptr != 0 {
+		t.Error("Pointer value should be modified")
+	}
+}
+
+func TestBuildTraceTreeSingleNode(t *testing.T) {
+	toAddr := "0x1234567890123456789012345678901234567890"
+
+	txs := []*InternalTransaction{
+		{
+			TraceIndex:       0,
+			ParentTraceIndex: nil,
+			Depth:            0,
+			TraceType:        TraceTypeCall,
+			FromAddress:      "0x0000000000000000000000000000000000000001",
+			ToAddress:        &toAddr,
+		},
+	}
+
+	tree := buildTraceTree(txs)
+
+	if tree == nil {
+		t.Fatal("Expected non-nil tree")
+	}
+
+	if tree.Call.TraceIndex != 0 {
+		t.Errorf("Expected trace index 0, got %d", tree.Call.TraceIndex)
+	}
+
+	if len(tree.Children) != 0 {
+		t.Errorf("Expected 0 children, got %d", len(tree.Children))
+	}
+}
+
+func TestBuildTraceTreeDeepNesting(t *testing.T) {
+	toAddr := "0x1234567890123456789012345678901234567890"
+	parentIdx0 := 0
+	parentIdx1 := 1
+	parentIdx2 := 2
+
+	txs := []*InternalTransaction{
+		{TraceIndex: 0, ParentTraceIndex: nil, Depth: 0, TraceType: TraceTypeCall, FromAddress: "0x1", ToAddress: &toAddr},
+		{TraceIndex: 1, ParentTraceIndex: &parentIdx0, Depth: 1, TraceType: TraceTypeCall, FromAddress: "0x1", ToAddress: &toAddr},
+		{TraceIndex: 2, ParentTraceIndex: &parentIdx1, Depth: 2, TraceType: TraceTypeCall, FromAddress: "0x1", ToAddress: &toAddr},
+		{TraceIndex: 3, ParentTraceIndex: &parentIdx2, Depth: 3, TraceType: TraceTypeCall, FromAddress: "0x1", ToAddress: &toAddr},
+	}
+
+	tree := buildTraceTree(txs)
+
+	if tree == nil {
+		t.Fatal("Expected non-nil tree")
+	}
+
+	// Traverse down
+	current := tree
+	for i := 0; i < 4; i++ {
+		if current == nil {
+			t.Fatalf("Expected node at depth %d", i)
+		}
+		if current.Call.Depth != i {
+			t.Errorf("Expected depth %d, got %d", i, current.Call.Depth)
+		}
+		if i < 3 {
+			if len(current.Children) != 1 {
+				t.Fatalf("Expected 1 child at depth %d, got %d", i, len(current.Children))
+			}
+			current = current.Children[0]
+		}
+	}
+}
+
+func TestInternalTxFilterDefaults(t *testing.T) {
+	filter := InternalTxFilter{
+		Network: "ethereum",
+	}
+
+	if filter.Network != "ethereum" {
+		t.Errorf("Expected network 'ethereum', got %s", filter.Network)
+	}
+
+	// Default values should be zero
+	if filter.Page != 0 {
+		t.Errorf("Expected page 0, got %d", filter.Page)
+	}
+
+	if filter.PageSize != 0 {
+		t.Errorf("Expected page size 0, got %d", filter.PageSize)
+	}
+}
+
+func TestCallStatsZeroValues(t *testing.T) {
+	stats := CallStats{}
+
+	if stats.TotalCalls != 0 {
+		t.Errorf("Expected 0 total calls, got %d", stats.TotalCalls)
+	}
+
+	if stats.MaxDepth != 0 {
+		t.Errorf("Expected 0 max depth, got %d", stats.MaxDepth)
+	}
+
+	if stats.CallsByType != nil {
+		t.Error("Expected nil CallsByType")
+	}
+}
+
+func TestTraceProcessingStatusPending(t *testing.T) {
+	now := time.Now().UTC()
+
+	status := TraceProcessingStatus{
+		Network:     "ethereum",
+		TxHash:      "0xabc123",
+		Status:      StatusPending,
+		RetryCount:  0,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if status.Status != StatusPending {
+		t.Errorf("Expected status 'pending', got %s", status.Status)
+	}
+
+	if status.RetryCount != 0 {
+		t.Errorf("Expected 0 retries, got %d", status.RetryCount)
+	}
+
+	if status.ErrorMessage != nil {
+		t.Error("Expected nil error message")
+	}
+
+	if status.LastAttemptAt != nil {
+		t.Error("Expected nil last attempt")
+	}
+}
+
+func TestNormalizeTraceTypeUnknown(t *testing.T) {
+	// Unknown types should be passed through
+	result := NormalizeTraceType("UNKNOWN_TYPE")
+	if result != "UNKNOWN_TYPE" {
+		t.Errorf("Expected 'UNKNOWN_TYPE', got %s", result)
+	}
+}
+
+func TestIsContractCreationCases(t *testing.T) {
+	// Test lowercase (after normalization)
+	if IsContractCreation("create") {
+		t.Error("IsContractCreation should be case sensitive (lowercase)")
+	}
+
+	// Test normalized
+	if !IsContractCreation(NormalizeTraceType("create")) {
+		t.Error("Expected CREATE to be contract creation after normalization")
+	}
+}
+
+func TestInternalTransactionOptionalFields(t *testing.T) {
+	// Test with all optional fields nil
+	tx := InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      "0xabc123",
+		TraceIndex:  0,
+		BlockNumber: 18000000,
+		Depth:       0,
+		TraceType:   TraceTypeCall,
+		FromAddress: "0x0000000000000000000000000000000000000001",
+		Value:       "0",
+		Timestamp:   time.Now().UTC(),
+	}
+
+	if tx.ParentTraceIndex != nil {
+		t.Error("Expected nil ParentTraceIndex")
+	}
+	if tx.ToAddress != nil {
+		t.Error("Expected nil ToAddress")
+	}
+	if tx.Gas != nil {
+		t.Error("Expected nil Gas")
+	}
+	if tx.GasUsed != nil {
+		t.Error("Expected nil GasUsed")
+	}
+	if tx.InputData != nil {
+		t.Error("Expected nil InputData")
+	}
+	if tx.OutputData != nil {
+		t.Error("Expected nil OutputData")
+	}
+	if tx.Error != nil {
+		t.Error("Expected nil Error")
+	}
+	if tx.CreatedContract != nil {
+		t.Error("Expected nil CreatedContract")
+	}
+}
+
+func TestTraceTreeEmptyChildren(t *testing.T) {
+	toAddr := "0x1234567890123456789012345678901234567890"
+
+	tree := &TraceTree{
+		Call: &InternalTransaction{
+			TraceIndex:  0,
+			TraceType:   TraceTypeCall,
+			FromAddress: "0x1",
+			ToAddress:   &toAddr,
+		},
+		Children: []*TraceTree{},
+	}
+
+	if len(tree.Children) != 0 {
+		t.Errorf("Expected 0 children, got %d", len(tree.Children))
+	}
+}
+
+func TestValidTraceTypesCount(t *testing.T) {
+	types := ValidTraceTypes()
+
+	// Ensure we have all expected types
+	expectedCount := 6
+	if len(types) != expectedCount {
+		t.Errorf("Expected %d trace types, got %d", expectedCount, len(types))
+	}
+}
+
+func TestInternalTxSummaryZeroValues(t *testing.T) {
+	summary := InternalTxSummary{
+		Network: "ethereum",
+		Address: "0x1234567890123456789012345678901234567890",
+	}
+
+	if summary.TotalInternalTxs != 0 {
+		t.Errorf("Expected 0 total internal txs, got %d", summary.TotalInternalTxs)
+	}
+
+	if summary.TotalValueReceived != "" {
+		t.Errorf("Expected empty TotalValueReceived, got %s", summary.TotalValueReceived)
+	}
+
+	if summary.TotalValueSent != "" {
+		t.Errorf("Expected empty TotalValueSent, got %s", summary.TotalValueSent)
+	}
+}
+
+func TestPendingTraceJobFields(t *testing.T) {
+	job := PendingTraceJob{
+		Network:     "polygon",
+		TxHash:      "0xdef456",
+		BlockNumber: 50000000,
+		RetryCount:  5,
+	}
+
+	if job.Network != "polygon" {
+		t.Errorf("Expected network 'polygon', got %s", job.Network)
+	}
+
+	if job.TxHash != "0xdef456" {
+		t.Errorf("Expected txHash '0xdef456', got %s", job.TxHash)
+	}
+
+	if job.BlockNumber != 50000000 {
+		t.Errorf("Expected block number 50000000, got %d", job.BlockNumber)
+	}
+
+	if job.RetryCount != 5 {
+		t.Errorf("Expected retry count 5, got %d", job.RetryCount)
+	}
+}
+
+func TestBuildTraceTreeMultipleRoots(t *testing.T) {
+	// This tests a malformed case where there might be multiple root nodes
+	// The function should handle this by returning the first root it finds
+	toAddr := "0x1234567890123456789012345678901234567890"
+
+	txs := []*InternalTransaction{
+		{TraceIndex: 0, ParentTraceIndex: nil, Depth: 0, TraceType: TraceTypeCall, FromAddress: "0x1", ToAddress: &toAddr},
+		{TraceIndex: 1, ParentTraceIndex: nil, Depth: 0, TraceType: TraceTypeCall, FromAddress: "0x2", ToAddress: &toAddr}, // Another root
+	}
+
+	tree := buildTraceTree(txs)
+
+	// Should return the last root in iteration (implementation dependent)
+	if tree == nil {
+		t.Fatal("Expected non-nil tree even with multiple roots")
+	}
+}

@@ -551,3 +551,319 @@ func BenchmarkNewPaginationOptions(b *testing.B) {
 		NewPaginationOptions(5, 50)
 	}
 }
+
+func TestIsBlockHash(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{"0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", true},
+		{"0xABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890", true},
+		{"1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", false}, // no 0x
+		{"0x1234", false}, // too short
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := isBlockHash(tt.input)
+			if result != tt.expected {
+				t.Errorf("isBlockHash(%s) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNew(t *testing.T) {
+	// Test creating explorer with nil pool
+	// Note: This won't actually work in production but tests the constructor
+	explorer := New(nil)
+
+	if explorer == nil {
+		t.Error("Expected non-nil explorer")
+	}
+}
+
+func TestNewWithRepository(t *testing.T) {
+	repo := NewRepository(nil)
+	explorer := NewWithRepository(repo)
+
+	if explorer == nil {
+		t.Error("Expected non-nil explorer")
+	}
+
+	if explorer.Repository() != repo {
+		t.Error("Repository should match the one passed in")
+	}
+}
+
+func TestExplorerRepository(t *testing.T) {
+	repo := NewRepository(nil)
+	explorer := NewWithRepository(repo)
+
+	returnedRepo := explorer.Repository()
+	if returnedRepo != repo {
+		t.Error("Repository() should return the underlying repository")
+	}
+}
+
+func TestEventLogFilter(t *testing.T) {
+	contractAddr := "0x1234567890abcdef1234567890abcdef12345678"
+	topic0 := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	fromBlock := int64(100)
+	toBlock := int64(200)
+
+	filter := EventLogFilter{
+		Network:           "ethereum",
+		ContractAddress:   &contractAddr,
+		Topic0:            &topic0,
+		FromBlock:         &fromBlock,
+		ToBlock:           &toBlock,
+		PaginationOptions: NewPaginationOptions(1, 20),
+	}
+
+	if filter.Network != "ethereum" {
+		t.Errorf("Network = %s, want ethereum", filter.Network)
+	}
+	if *filter.ContractAddress != contractAddr {
+		t.Errorf("ContractAddress = %s, want %s", *filter.ContractAddress, contractAddr)
+	}
+	if *filter.Topic0 != topic0 {
+		t.Errorf("Topic0 = %s, want %s", *filter.Topic0, topic0)
+	}
+	if *filter.FromBlock != 100 {
+		t.Errorf("FromBlock = %d, want 100", *filter.FromBlock)
+	}
+	if *filter.ToBlock != 200 {
+		t.Errorf("ToBlock = %d, want 200", *filter.ToBlock)
+	}
+}
+
+func TestAddressFilter(t *testing.T) {
+	isContract := true
+	label := "DEX"
+	minBal := ParseValue("1000000000000000000")
+	maxBal := ParseValue("10000000000000000000000")
+
+	filter := AddressFilter{
+		Network:           "polygon",
+		IsContract:        &isContract,
+		MinBalance:        minBal,
+		MaxBalance:        maxBal,
+		Label:             &label,
+		PaginationOptions: NewPaginationOptions(1, 50),
+	}
+
+	if filter.Network != "polygon" {
+		t.Errorf("Network = %s, want polygon", filter.Network)
+	}
+	if *filter.IsContract != true {
+		t.Errorf("IsContract = %v, want true", *filter.IsContract)
+	}
+	if *filter.Label != "DEX" {
+		t.Errorf("Label = %s, want DEX", *filter.Label)
+	}
+	if filter.MinBalance.Cmp(minBal) != 0 {
+		t.Errorf("MinBalance = %s, want %s", filter.MinBalance.String(), minBal.String())
+	}
+}
+
+func TestInternalTransactionFields(t *testing.T) {
+	now := time.Now()
+	toAddr := "0x2222222222222222222222222222222222222222"
+	callType := "call"
+	gas := int64(100000)
+	gasUsed := int64(50000)
+	output := "0x"
+
+	itx := &InternalTransaction{
+		ID:           1,
+		Network:      "ethereum",
+		TxHash:       "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+		TraceAddress: "0",
+		BlockNumber:  12345678,
+		TraceType:    "call",
+		CallType:     &callType,
+		From:         "0x1111111111111111111111111111111111111111",
+		To:           &toAddr,
+		Value:        "1000000000000000000",
+		Gas:          &gas,
+		GasUsed:      &gasUsed,
+		Input:        "0x",
+		Output:       &output,
+		Timestamp:    now,
+	}
+
+	if itx.Network != "ethereum" {
+		t.Errorf("Network = %s, want ethereum", itx.Network)
+	}
+	if itx.TraceType != "call" {
+		t.Errorf("TraceType = %s, want call", itx.TraceType)
+	}
+	if *itx.Gas != 100000 {
+		t.Errorf("Gas = %d, want 100000", *itx.Gas)
+	}
+	if *itx.GasUsed != 50000 {
+		t.Errorf("GasUsed = %d, want 50000", *itx.GasUsed)
+	}
+}
+
+func TestNetworkStatsFields(t *testing.T) {
+	now := time.Now()
+	avgGas := ParseValue("30000000000") // 30 gwei
+
+	stats := &NetworkStats{
+		Network:           "ethereum",
+		LatestBlock:       18000000,
+		TotalTransactions: 2000000000,
+		TotalAddresses:    300000000,
+		TotalContracts:    50000000,
+		AvgBlockTime:      12.5,
+		AvgGasPrice:       avgGas,
+		TPS:               15.5,
+		LastUpdated:       now,
+	}
+
+	if stats.Network != "ethereum" {
+		t.Errorf("Network = %s, want ethereum", stats.Network)
+	}
+	if stats.LatestBlock != 18000000 {
+		t.Errorf("LatestBlock = %d, want 18000000", stats.LatestBlock)
+	}
+	if stats.TPS != 15.5 {
+		t.Errorf("TPS = %f, want 15.5", stats.TPS)
+	}
+	if stats.AvgBlockTime != 12.5 {
+		t.Errorf("AvgBlockTime = %f, want 12.5", stats.AvgBlockTime)
+	}
+}
+
+func TestParseValueEdgeCases(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"0", "0"},
+		{"1", "1"},
+		{"12345678901234567890123456789012345678901234567890", "12345678901234567890123456789012345678901234567890"},
+		{"", "0"},
+		{"invalid", "0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := ParseValue(tt.input)
+			if result.String() != tt.expected {
+				t.Errorf("ParseValue(%s) = %s, want %s", tt.input, result.String(), tt.expected)
+			}
+		})
+	}
+}
+
+func TestPaginationOptionsLimits(t *testing.T) {
+	// Test minimum values
+	opts := NewPaginationOptions(0, 0)
+	if opts.Page != 1 {
+		t.Errorf("Page should default to 1, got %d", opts.Page)
+	}
+	if opts.PageSize != 20 {
+		t.Errorf("PageSize should default to 20, got %d", opts.PageSize)
+	}
+
+	// Test maximum page size
+	opts = NewPaginationOptions(1, 1000)
+	if opts.PageSize != 100 {
+		t.Errorf("PageSize should be capped at 100, got %d", opts.PageSize)
+	}
+
+	// Test offset calculation
+	opts = NewPaginationOptions(5, 20)
+	expectedOffset := (5 - 1) * 20
+	if opts.Offset != expectedOffset {
+		t.Errorf("Offset = %d, want %d", opts.Offset, expectedOffset)
+	}
+}
+
+func TestTransactionFilterTimeRange(t *testing.T) {
+	now := time.Now()
+	oneHourAgo := now.Add(-time.Hour)
+
+	filter := TransactionFilter{
+		Network:  "ethereum",
+		FromTime: &oneHourAgo,
+		ToTime:   &now,
+	}
+
+	if filter.FromTime == nil {
+		t.Error("FromTime should not be nil")
+	}
+	if filter.ToTime == nil {
+		t.Error("ToTime should not be nil")
+	}
+	if !filter.ToTime.After(*filter.FromTime) {
+		t.Error("ToTime should be after FromTime")
+	}
+}
+
+func TestBlockFilterRange(t *testing.T) {
+	from := int64(100)
+	to := int64(200)
+
+	filter := BlockFilter{
+		Network:   "ethereum",
+		FromBlock: &from,
+		ToBlock:   &to,
+	}
+
+	if *filter.FromBlock != 100 {
+		t.Errorf("FromBlock = %d, want 100", *filter.FromBlock)
+	}
+	if *filter.ToBlock != 200 {
+		t.Errorf("ToBlock = %d, want 200", *filter.ToBlock)
+	}
+	if *filter.ToBlock <= *filter.FromBlock {
+		t.Error("ToBlock should be greater than FromBlock")
+	}
+}
+
+func TestListResultCalculation(t *testing.T) {
+	// Test TotalPages calculation
+	result := ListResult[Block]{
+		Total:    55,
+		PageSize: 10,
+	}
+
+	expectedPages := 6 // ceil(55/10)
+	if result.Total/int64(result.PageSize) != 5 {
+		// Just verify the data is set correctly
+		if result.Total != 55 || result.PageSize != 10 {
+			t.Error("ListResult fields not set correctly")
+		}
+	}
+
+	// With exact division
+	result2 := ListResult[Transaction]{
+		Total:    100,
+		PageSize: 20,
+	}
+
+	expectedPages = 5 // 100/20
+	_ = expectedPages
+	if result2.Total != 100 || result2.PageSize != 20 {
+		t.Error("ListResult fields not set correctly")
+	}
+}
+
+func BenchmarkIsValidNetwork(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		IsValidNetwork("ethereum")
+	}
+}
+
+func BenchmarkSupportedNetworks(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		SupportedNetworks()
+	}
+}

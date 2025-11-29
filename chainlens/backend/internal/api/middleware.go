@@ -384,3 +384,167 @@ func LoggingMiddleware() func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// APIKeyInfo represents API key information
+type APIKeyInfo struct {
+	ID          string
+	UserID      string
+	Name        string
+	Permissions []string
+	RateLimit   int // requests per minute
+	Active      bool
+}
+
+// APIKeyStore interface for API key validation
+type APIKeyStore interface {
+	ValidateKey(ctx context.Context, key string) (*APIKeyInfo, error)
+}
+
+// InMemoryAPIKeyStore provides in-memory API key storage
+type InMemoryAPIKeyStore struct {
+	keys map[string]*APIKeyInfo
+	mu   sync.RWMutex
+}
+
+// NewInMemoryAPIKeyStore creates a new in-memory key store
+func NewInMemoryAPIKeyStore() *InMemoryAPIKeyStore {
+	return &InMemoryAPIKeyStore{
+		keys: make(map[string]*APIKeyInfo),
+	}
+}
+
+// AddKey adds an API key
+func (s *InMemoryAPIKeyStore) AddKey(key string, info *APIKeyInfo) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keys[key] = info
+}
+
+// ValidateKey validates an API key
+func (s *InMemoryAPIKeyStore) ValidateKey(ctx context.Context, key string) (*APIKeyInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	info, ok := s.keys[key]
+	if !ok || !info.Active {
+		return nil, nil
+	}
+	return info, nil
+}
+
+// APIKeyAuthMiddleware validates API keys
+func APIKeyAuthMiddleware(store APIKeyStore, required bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := extractAPIKey(r)
+
+			if key == "" {
+				if required {
+					respondError(w, http.StatusUnauthorized, "API key required")
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			info, err := store.ValidateKey(r.Context(), key)
+			if err != nil {
+				respondError(w, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+
+			if info == nil {
+				respondError(w, http.StatusUnauthorized, "Invalid API key")
+				return
+			}
+
+			// Add key info to context
+			ctx := context.WithValue(r.Context(), "apiKeyInfo", info)
+			ctx = context.WithValue(ctx, "userID", info.UserID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// extractAPIKey extracts API key from request
+func extractAPIKey(r *http.Request) string {
+	// Check X-API-Key header
+	if key := r.Header.Get("X-API-Key"); key != "" {
+		return key
+	}
+
+	// Check Authorization header with Bearer token
+	auth := r.Header.Get("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		return strings.TrimPrefix(auth, "Bearer ")
+	}
+
+	// Check query parameter
+	if key := r.URL.Query().Get("api_key"); key != "" {
+		return key
+	}
+
+	return ""
+}
+
+// SecureHeadersMiddleware adds security headers
+func SecureHeadersMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("X-XSS-Protection", "1; mode=block")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequirePermission middleware checks for specific permission
+func RequirePermission(permission string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			info, ok := r.Context().Value("apiKeyInfo").(*APIKeyInfo)
+			if !ok {
+				respondError(w, http.StatusUnauthorized, "API key required")
+				return
+			}
+
+			hasPermission := false
+			for _, p := range info.Permissions {
+				if p == permission || p == "*" {
+					hasPermission = true
+					break
+				}
+			}
+
+			if !hasPermission {
+				respondError(w, http.StatusForbidden, "Insufficient permissions")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// GetClientIP extracts client IP from request
+func GetClientIP(r *http.Request) string {
+	// Check X-Forwarded-For
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+
+	// Check X-Real-IP
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+
+	// Use RemoteAddr
+	addr := r.RemoteAddr
+	if idx := strings.LastIndex(addr, ":"); idx != -1 {
+		return addr[:idx]
+	}
+	return addr
+}
