@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +16,69 @@ import (
 	"time"
 
 	"getchainlens.com/chainlens/backend/internal/config"
+	"getchainlens.com/chainlens/backend/internal/database"
 )
+
+// mockDB implements BillingDB for testing
+type mockDB struct {
+	users             map[string]*database.User // keyed by stripe customer ID
+	updateStripeCalls []updateStripeCall
+	updatePlanCalls   []updatePlanCall
+	shouldError       bool
+}
+
+type updateStripeCall struct {
+	id, customerID, subscriptionID string
+}
+
+type updatePlanCall struct {
+	id, plan string
+}
+
+func newMockDB() *mockDB {
+	return &mockDB{
+		users: make(map[string]*database.User),
+	}
+}
+
+func (m *mockDB) UpdateUserStripe(ctx context.Context, id, customerID, subscriptionID string) error {
+	if m.shouldError {
+		return errors.New("mock db error")
+	}
+	m.updateStripeCalls = append(m.updateStripeCalls, updateStripeCall{id, customerID, subscriptionID})
+	return nil
+}
+
+func (m *mockDB) GetUserByStripeCustomerID(ctx context.Context, customerID string) (*database.User, error) {
+	if m.shouldError {
+		return nil, errors.New("mock db error")
+	}
+	user, ok := m.users[customerID]
+	if !ok {
+		return nil, errors.New("user not found")
+	}
+	return user, nil
+}
+
+func (m *mockDB) UpdateUserPlan(ctx context.Context, id, plan string) error {
+	if m.shouldError {
+		return errors.New("mock db error")
+	}
+	m.updatePlanCalls = append(m.updatePlanCalls, updatePlanCall{id, plan})
+	return nil
+}
+
+// Helper to create a test server
+func newTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *StripeClient) {
+	server := httptest.NewServer(handler)
+	client := &StripeClient{
+		secretKey:     "sk_test_123",
+		webhookSecret: "whsec_test",
+		httpClient:    server.Client(),
+		baseURL:       server.URL,
+	}
+	return server, client
+}
 
 func TestNewStripeClient(t *testing.T) {
 	cfg := &config.Config{
@@ -273,13 +336,30 @@ func TestReadRequestBody(t *testing.T) {
 	}
 }
 
-func TestStripeClient_CreateCustomer_MockServer(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/customers" {
-			t.Errorf("path = %s, want /v1/customers", r.URL.Path)
+func TestStripeClient_CreateCustomer(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/customers" {
+			t.Errorf("path = %s, want /customers", r.URL.Path)
 		}
 		if r.Method != "POST" {
 			t.Errorf("method = %s, want POST", r.Method)
+		}
+
+		// Verify auth header
+		username, _, ok := r.BasicAuth()
+		if !ok || username != "sk_test_123" {
+			t.Errorf("missing or incorrect basic auth")
+		}
+
+		// Verify form data
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("email") != "test@example.com" {
+			t.Errorf("email = %s, want test@example.com", r.Form.Get("email"))
+		}
+		if r.Form.Get("name") != "Test User" {
+			t.Errorf("name = %s, want Test User", r.Form.Get("name"))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -288,13 +368,221 @@ func TestStripeClient_CreateCustomer_MockServer(t *testing.T) {
 			Email: "test@example.com",
 			Name:  "Test User",
 		})
-	}))
+	})
 	defer server.Close()
 
-	// Verify server received correct request
-	// We can't easily call the actual API without injecting the base URL,
-	// but we verified the mock server handles the expected path/method
-	t.Log("Mock server verified: POST /v1/customers handled correctly")
+	customer, err := client.CreateCustomer(context.Background(), "test@example.com", "Test User")
+	if err != nil {
+		t.Fatalf("CreateCustomer failed: %v", err)
+	}
+
+	if customer.ID != "cus_123" {
+		t.Errorf("ID = %s, want cus_123", customer.ID)
+	}
+	if customer.Email != "test@example.com" {
+		t.Errorf("Email = %s, want test@example.com", customer.Email)
+	}
+}
+
+func TestStripeClient_CreateCustomer_Error(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error": map[string]string{
+				"message": "Invalid email address",
+				"type":    "invalid_request_error",
+			},
+		})
+	})
+	defer server.Close()
+
+	_, err := client.CreateCustomer(context.Background(), "invalid", "Test")
+	if err == nil {
+		t.Fatal("Expected error for invalid email")
+	}
+	if err.Error() != "Stripe API error: Invalid email address" {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestStripeClient_CreateCheckoutSession(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/checkout/sessions" {
+			t.Errorf("path = %s, want /checkout/sessions", r.URL.Path)
+		}
+
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("mode") != "subscription" {
+			t.Errorf("mode = %s, want subscription", r.Form.Get("mode"))
+		}
+		if r.Form.Get("customer") != "cus_123" {
+			t.Errorf("customer = %s, want cus_123", r.Form.Get("customer"))
+		}
+		if r.Form.Get("line_items[0][price]") != PriceIDProMonthly {
+			t.Errorf("price = %s, want %s", r.Form.Get("line_items[0][price]"), PriceIDProMonthly)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CheckoutSession{
+			ID:         "cs_test_123",
+			URL:        "https://checkout.stripe.com/pay/cs_test_123",
+			CustomerID: "cus_123",
+		})
+	})
+	defer server.Close()
+
+	session, err := client.CreateCheckoutSession(
+		context.Background(),
+		"cus_123",
+		PriceIDProMonthly,
+		"https://example.com/success",
+		"https://example.com/cancel",
+	)
+	if err != nil {
+		t.Fatalf("CreateCheckoutSession failed: %v", err)
+	}
+
+	if session.ID != "cs_test_123" {
+		t.Errorf("ID = %s, want cs_test_123", session.ID)
+	}
+	if session.URL != "https://checkout.stripe.com/pay/cs_test_123" {
+		t.Errorf("URL = %s", session.URL)
+	}
+}
+
+func TestStripeClient_CreateCheckoutSession_NoCustomer(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		// customer should not be set
+		if r.Form.Get("customer") != "" {
+			t.Errorf("customer should be empty, got %s", r.Form.Get("customer"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(CheckoutSession{
+			ID:  "cs_test_123",
+			URL: "https://checkout.stripe.com/pay/cs_test_123",
+		})
+	})
+	defer server.Close()
+
+	session, err := client.CreateCheckoutSession(
+		context.Background(),
+		"", // no customer
+		PriceIDProMonthly,
+		"https://example.com/success",
+		"https://example.com/cancel",
+	)
+	if err != nil {
+		t.Fatalf("CreateCheckoutSession failed: %v", err)
+	}
+	if session.ID != "cs_test_123" {
+		t.Errorf("ID = %s, want cs_test_123", session.ID)
+	}
+}
+
+func TestStripeClient_CreatePortalSession(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/billing_portal/sessions" {
+			t.Errorf("path = %s, want /billing_portal/sessions", r.URL.Path)
+		}
+
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("customer") != "cus_123" {
+			t.Errorf("customer = %s, want cus_123", r.Form.Get("customer"))
+		}
+		if r.Form.Get("return_url") != "https://example.com/billing" {
+			t.Errorf("return_url = %s", r.Form.Get("return_url"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"url": "https://billing.stripe.com/session/test_123",
+		})
+	})
+	defer server.Close()
+
+	url, err := client.CreatePortalSession(context.Background(), "cus_123", "https://example.com/billing")
+	if err != nil {
+		t.Fatalf("CreatePortalSession failed: %v", err)
+	}
+
+	if url != "https://billing.stripe.com/session/test_123" {
+		t.Errorf("url = %s", url)
+	}
+}
+
+func TestStripeClient_GetSubscription(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/subscriptions/sub_123" {
+			t.Errorf("path = %s, want /subscriptions/sub_123", r.URL.Path)
+		}
+		if r.Method != "GET" {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(Subscription{
+			ID:                "sub_123",
+			CustomerID:        "cus_123",
+			Status:            "active",
+			CurrentPeriodEnd:  1234567890,
+			CancelAtPeriodEnd: false,
+			Plan:              PriceIDProMonthly,
+		})
+	})
+	defer server.Close()
+
+	sub, err := client.GetSubscription(context.Background(), "sub_123")
+	if err != nil {
+		t.Fatalf("GetSubscription failed: %v", err)
+	}
+
+	if sub.ID != "sub_123" {
+		t.Errorf("ID = %s, want sub_123", sub.ID)
+	}
+	if sub.Status != "active" {
+		t.Errorf("Status = %s, want active", sub.Status)
+	}
+	if sub.CustomerID != "cus_123" {
+		t.Errorf("CustomerID = %s, want cus_123", sub.CustomerID)
+	}
+}
+
+func TestStripeClient_CancelSubscription(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/subscriptions/sub_123" {
+			t.Errorf("path = %s, want /subscriptions/sub_123", r.URL.Path)
+		}
+		if r.Method != "POST" {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("cancel_at_period_end") != "true" {
+			t.Errorf("cancel_at_period_end = %s, want true", r.Form.Get("cancel_at_period_end"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(Subscription{
+			ID:                "sub_123",
+			CancelAtPeriodEnd: true,
+		})
+	})
+	defer server.Close()
+
+	err := client.CancelSubscription(context.Background(), "sub_123")
+	if err != nil {
+		t.Fatalf("CancelSubscription failed: %v", err)
+	}
 }
 
 func TestWebhookEventData_CheckoutCompleted(t *testing.T) {
@@ -470,6 +758,409 @@ func TestPriceIDConstants(t *testing.T) {
 	}
 	if PriceIDEnterpriseYearly != "price_enterprise_yearly" {
 		t.Errorf("PriceIDEnterpriseYearly = %s", PriceIDEnterpriseYearly)
+	}
+}
+
+// Webhook handler tests with mock DB
+
+func TestProcessWebhookEvent_CheckoutCompleted_WithDB(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"customer":"cus_123","subscription":"sub_123","client_reference_id":"user_456"}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "checkout.session.completed",
+		Data: eventDataJSON,
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+
+	if len(db.updateStripeCalls) != 1 {
+		t.Fatalf("expected 1 UpdateUserStripe call, got %d", len(db.updateStripeCalls))
+	}
+
+	call := db.updateStripeCalls[0]
+	if call.id != "user_456" {
+		t.Errorf("id = %s, want user_456", call.id)
+	}
+	if call.customerID != "cus_123" {
+		t.Errorf("customerID = %s, want cus_123", call.customerID)
+	}
+	if call.subscriptionID != "sub_123" {
+		t.Errorf("subscriptionID = %s, want sub_123", call.subscriptionID)
+	}
+}
+
+func TestProcessWebhookEvent_CheckoutCompleted_NoClientRef(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"customer":"cus_123","subscription":"sub_123"}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "checkout.session.completed",
+		Data: eventDataJSON,
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+
+	// Should not call UpdateUserStripe when no client_reference_id
+	if len(db.updateStripeCalls) != 0 {
+		t.Errorf("expected 0 UpdateUserStripe calls, got %d", len(db.updateStripeCalls))
+	}
+}
+
+func TestProcessWebhookEvent_SubscriptionCreated_WithDB(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+	db.users["cus_123"] = &database.User{ID: "user_456"}
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"id":"sub_123","customer":"cus_123","status":"active","items":{"data":[{"price":{"id":"price_pro_monthly"}}]}}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "customer.subscription.created",
+		Data: eventDataJSON,
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+
+	if len(db.updatePlanCalls) != 1 {
+		t.Fatalf("expected 1 UpdateUserPlan call, got %d", len(db.updatePlanCalls))
+	}
+
+	call := db.updatePlanCalls[0]
+	if call.id != "user_456" {
+		t.Errorf("id = %s, want user_456", call.id)
+	}
+	if call.plan != "pro" {
+		t.Errorf("plan = %s, want pro", call.plan)
+	}
+}
+
+func TestProcessWebhookEvent_SubscriptionCreated_Trialing(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+	db.users["cus_123"] = &database.User{ID: "user_456"}
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"id":"sub_123","customer":"cus_123","status":"trialing","items":{"data":[{"price":{"id":"price_enterprise_yearly"}}]}}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "customer.subscription.created",
+		Data: eventDataJSON,
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+
+	if len(db.updatePlanCalls) != 1 {
+		t.Fatalf("expected 1 UpdateUserPlan call, got %d", len(db.updatePlanCalls))
+	}
+
+	if db.updatePlanCalls[0].plan != "enterprise" {
+		t.Errorf("plan = %s, want enterprise", db.updatePlanCalls[0].plan)
+	}
+}
+
+func TestProcessWebhookEvent_SubscriptionCreated_InactiveStatus(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+	db.users["cus_123"] = &database.User{ID: "user_456"}
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"id":"sub_123","customer":"cus_123","status":"past_due","items":{"data":[{"price":{"id":"price_pro_monthly"}}]}}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "customer.subscription.created",
+		Data: eventDataJSON,
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+
+	// Should not update plan for inactive status
+	if len(db.updatePlanCalls) != 0 {
+		t.Errorf("expected 0 UpdateUserPlan calls, got %d", len(db.updatePlanCalls))
+	}
+}
+
+func TestProcessWebhookEvent_SubscriptionCreated_UserNotFound(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB() // empty users
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"id":"sub_123","customer":"cus_unknown","status":"active","items":{"data":[{"price":{"id":"price_pro_monthly"}}]}}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "customer.subscription.created",
+		Data: eventDataJSON,
+	}
+
+	// Should not error when user is not found
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+}
+
+func TestProcessWebhookEvent_SubscriptionUpdated_WithDB(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+	db.users["cus_123"] = &database.User{ID: "user_456"}
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"id":"sub_123","customer":"cus_123","status":"active","items":{"data":[{"price":{"id":"price_pro_yearly"}}]}}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "customer.subscription.updated",
+		Data: eventDataJSON,
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+
+	if len(db.updatePlanCalls) != 1 {
+		t.Fatalf("expected 1 UpdateUserPlan call, got %d", len(db.updatePlanCalls))
+	}
+
+	if db.updatePlanCalls[0].plan != "pro" {
+		t.Errorf("plan = %s, want pro", db.updatePlanCalls[0].plan)
+	}
+}
+
+func TestProcessWebhookEvent_SubscriptionDeleted_WithDB(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+	db.users["cus_123"] = &database.User{ID: "user_456"}
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"customer":"cus_123"}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "customer.subscription.deleted",
+		Data: eventDataJSON,
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+
+	if len(db.updatePlanCalls) != 1 {
+		t.Fatalf("expected 1 UpdateUserPlan call, got %d", len(db.updatePlanCalls))
+	}
+
+	call := db.updatePlanCalls[0]
+	if call.id != "user_456" {
+		t.Errorf("id = %s, want user_456", call.id)
+	}
+	if call.plan != "free" {
+		t.Errorf("plan = %s, want free", call.plan)
+	}
+}
+
+func TestProcessWebhookEvent_SubscriptionDeleted_UserNotFound(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB() // empty users
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"customer":"cus_unknown"}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "customer.subscription.deleted",
+		Data: eventDataJSON,
+	}
+
+	// Should not error when user is not found
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+}
+
+func TestProcessWebhookEvent_InvalidJSON(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "checkout.session.completed",
+		Data: json.RawMessage(`invalid json`),
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err == nil {
+		t.Fatal("Expected error for invalid JSON")
+	}
+}
+
+func TestProcessWebhookEvent_CheckoutCompleted_InvalidObjectJSON(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`invalid`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "checkout.session.completed",
+		Data: eventDataJSON,
+	}
+
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err == nil {
+		t.Fatal("Expected error for invalid object JSON")
+	}
+}
+
+func TestProcessWebhookEvent_SubscriptionCreated_NoItems(t *testing.T) {
+	client := &StripeClient{}
+	db := newMockDB()
+	db.users["cus_123"] = &database.User{ID: "user_456"}
+
+	eventData := WebhookEventData{
+		Object: json.RawMessage(`{"id":"sub_123","customer":"cus_123","status":"active","items":{"data":[]}}`),
+	}
+	eventDataJSON, _ := json.Marshal(eventData)
+
+	event := &WebhookEvent{
+		ID:   "evt_123",
+		Type: "customer.subscription.created",
+		Data: eventDataJSON,
+	}
+
+	// Should not error when items array is empty
+	err := client.ProcessWebhookEvent(context.Background(), db, event)
+	if err != nil {
+		t.Fatalf("ProcessWebhookEvent failed: %v", err)
+	}
+
+	// Should not update plan when no items
+	if len(db.updatePlanCalls) != 0 {
+		t.Errorf("expected 0 UpdateUserPlan calls, got %d", len(db.updatePlanCalls))
+	}
+}
+
+// HTTP error handling tests
+
+func TestStripeClient_HTTPError_StatusCode(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{}`))
+	})
+	defer server.Close()
+
+	_, err := client.CreateCustomer(context.Background(), "test@example.com", "Test")
+	if err == nil {
+		t.Fatal("Expected error for 500 status")
+	}
+	if err.Error() != "Stripe API error: status 500" {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestStripeClient_HTTPError_InvalidJSON(t *testing.T) {
+	server, client := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`invalid json`))
+	})
+	defer server.Close()
+
+	_, err := client.CreateCustomer(context.Background(), "test@example.com", "Test")
+	if err == nil {
+		t.Fatal("Expected error for invalid JSON response")
+	}
+}
+
+func TestStripeClient_WithHTTPClient(t *testing.T) {
+	cfg := &config.Config{
+		StripeSecretKey:     "sk_test_123",
+		StripeWebhookSecret: "whsec_123",
+	}
+
+	client := NewStripeClient(cfg)
+
+	// Create a custom HTTP client
+	customClient := &http.Client{Timeout: 5 * time.Second}
+	client.WithHTTPClient(customClient)
+
+	if client.httpClient != customClient {
+		t.Error("WithHTTPClient did not set the custom client")
+	}
+}
+
+func TestStripeClient_WithBaseURL(t *testing.T) {
+	cfg := &config.Config{
+		StripeSecretKey:     "sk_test_123",
+		StripeWebhookSecret: "whsec_123",
+	}
+
+	client := NewStripeClient(cfg)
+	client.WithBaseURL("http://localhost:8080")
+
+	if client.baseURL != "http://localhost:8080" {
+		t.Errorf("baseURL = %s, want http://localhost:8080", client.baseURL)
+	}
+}
+
+func TestNewStripeClient_BaseURL(t *testing.T) {
+	cfg := &config.Config{
+		StripeSecretKey:     "sk_test_123",
+		StripeWebhookSecret: "whsec_123",
+	}
+
+	client := NewStripeClient(cfg)
+
+	if client.baseURL != stripeAPIBase {
+		t.Errorf("baseURL = %s, want %s", client.baseURL, stripeAPIBase)
 	}
 }
 

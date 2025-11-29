@@ -39,6 +39,10 @@ type Config struct {
 	// Limits
 	FreeAPICallsPerMonth int
 	ProAPICallsPerMonth  int
+
+	// Profiling
+	EnablePprof bool
+	PprofPort   int
 }
 
 func Load() (*Config, error) {
@@ -76,6 +80,10 @@ func Load() (*Config, error) {
 		// Limits
 		FreeAPICallsPerMonth: getEnvInt("FREE_API_CALLS_PER_MONTH", 1000),
 		ProAPICallsPerMonth:  getEnvInt("PRO_API_CALLS_PER_MONTH", 10000),
+
+		// Profiling
+		EnablePprof: getEnvBool("ENABLE_PPROF", false),
+		PprofPort:   getEnvInt("PPROF_PORT", 6060),
 	}, nil
 }
 
@@ -90,6 +98,15 @@ func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
 			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
 		}
 	}
 	return defaultValue

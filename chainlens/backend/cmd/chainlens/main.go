@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	_ "net/http/pprof" // Register pprof handlers
 	"os"
 	"os/signal"
 	"syscall"
@@ -31,6 +32,20 @@ func main() {
 
 	// Initialize router
 	router := api.NewRouter(cfg, db)
+
+	// Start pprof server if enabled
+	if cfg.EnablePprof {
+		go func() {
+			pprofAddr := fmt.Sprintf("localhost:%d", cfg.PprofPort)
+			log.Printf("Starting pprof server on %s", pprofAddr)
+			log.Printf("  CPU profile: go tool pprof http://%s/debug/pprof/profile?seconds=30", pprofAddr)
+			log.Printf("  Heap profile: go tool pprof http://%s/debug/pprof/heap", pprofAddr)
+			log.Printf("  Goroutines:   go tool pprof http://%s/debug/pprof/goroutine", pprofAddr)
+			if err := http.ListenAndServe(pprofAddr, nil); err != nil {
+				log.Printf("pprof server error: %v", err)
+			}
+		}()
+	}
 
 	// Create server
 	server := &http.Server{

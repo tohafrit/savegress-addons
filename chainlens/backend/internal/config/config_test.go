@@ -219,3 +219,86 @@ func TestGetEnvInt(t *testing.T) {
 		t.Errorf("expected 42 for invalid int, got %d", result)
 	}
 }
+
+func TestGetEnvBool(t *testing.T) {
+	// Test with unset env var
+	result := getEnvBool("NONEXISTENT_BOOL_VAR", true)
+	if result != true {
+		t.Errorf("expected true, got %v", result)
+	}
+
+	result = getEnvBool("NONEXISTENT_BOOL_VAR", false)
+	if result != false {
+		t.Errorf("expected false, got %v", result)
+	}
+
+	// Test with valid bool values
+	testCases := []struct {
+		value    string
+		expected bool
+	}{
+		{"true", true},
+		{"false", false},
+		{"1", true},
+		{"0", false},
+		{"TRUE", true},
+		{"FALSE", false},
+		{"True", true},
+		{"False", false},
+	}
+
+	for _, tc := range testCases {
+		os.Setenv("TEST_BOOL_VAR", tc.value)
+		result = getEnvBool("TEST_BOOL_VAR", !tc.expected)
+		if result != tc.expected {
+			t.Errorf("for value %q expected %v, got %v", tc.value, tc.expected, result)
+		}
+	}
+	os.Unsetenv("TEST_BOOL_VAR")
+
+	// Test with invalid bool (should return default)
+	os.Setenv("TEST_INVALID_BOOL", "not_a_bool")
+	defer os.Unsetenv("TEST_INVALID_BOOL")
+
+	result = getEnvBool("TEST_INVALID_BOOL", true)
+	if result != true {
+		t.Errorf("expected true for invalid bool, got %v", result)
+	}
+}
+
+func TestLoad_PprofConfig(t *testing.T) {
+	// Test defaults
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.EnablePprof != false {
+		t.Errorf("expected EnablePprof false by default, got %v", cfg.EnablePprof)
+	}
+
+	if cfg.PprofPort != 6060 {
+		t.Errorf("expected PprofPort 6060 by default, got %d", cfg.PprofPort)
+	}
+
+	// Test with env vars
+	os.Setenv("ENABLE_PPROF", "true")
+	os.Setenv("PPROF_PORT", "6061")
+	defer func() {
+		os.Unsetenv("ENABLE_PPROF")
+		os.Unsetenv("PPROF_PORT")
+	}()
+
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.EnablePprof != true {
+		t.Errorf("expected EnablePprof true, got %v", cfg.EnablePprof)
+	}
+
+	if cfg.PprofPort != 6061 {
+		t.Errorf("expected PprofPort 6061, got %d", cfg.PprofPort)
+	}
+}

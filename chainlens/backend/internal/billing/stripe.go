@@ -19,6 +19,18 @@ import (
 	"getchainlens.com/chainlens/backend/internal/database"
 )
 
+// HTTPClient interface for HTTP operations (allows mocking)
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+// BillingDB interface for database operations needed by billing
+type BillingDB interface {
+	UpdateUserStripe(ctx context.Context, id, customerID, subscriptionID string) error
+	GetUserByStripeCustomerID(ctx context.Context, customerID string) (*database.User, error)
+	UpdateUserPlan(ctx context.Context, id, plan string) error
+}
+
 // Price IDs for subscription plans
 const (
 	PriceIDProMonthly        = "price_pro_monthly"
@@ -32,9 +44,10 @@ const stripeAPIBase = "https://api.stripe.com/v1"
 
 // StripeClient handles Stripe API interactions
 type StripeClient struct {
-	secretKey      string
-	webhookSecret  string
-	httpClient     *http.Client
+	secretKey     string
+	webhookSecret string
+	httpClient    HTTPClient
+	baseURL       string // allows overriding for tests
 }
 
 // NewStripeClient creates a new Stripe client
@@ -45,7 +58,20 @@ func NewStripeClient(cfg *config.Config) *StripeClient {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		baseURL: stripeAPIBase,
 	}
+}
+
+// WithHTTPClient sets a custom HTTP client (for testing)
+func (s *StripeClient) WithHTTPClient(client HTTPClient) *StripeClient {
+	s.httpClient = client
+	return s
+}
+
+// WithBaseURL sets a custom base URL (for testing)
+func (s *StripeClient) WithBaseURL(url string) *StripeClient {
+	s.baseURL = url
+	return s
 }
 
 // CheckoutSession represents a Stripe checkout session
@@ -217,7 +243,7 @@ func parseSignatureHeader(header string) map[string]string {
 }
 
 // ProcessWebhookEvent processes a webhook event and updates the database
-func (s *StripeClient) ProcessWebhookEvent(ctx context.Context, db *database.DB, event *WebhookEvent) error {
+func (s *StripeClient) ProcessWebhookEvent(ctx context.Context, db BillingDB, event *WebhookEvent) error {
 	var eventData WebhookEventData
 	if err := json.Unmarshal(event.Data, &eventData); err != nil {
 		return err
@@ -242,7 +268,7 @@ func (s *StripeClient) ProcessWebhookEvent(ctx context.Context, db *database.DB,
 	}
 }
 
-func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, db *database.DB, data json.RawMessage) error {
+func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, db BillingDB, data json.RawMessage) error {
 	var session struct {
 		CustomerID     string `json:"customer"`
 		SubscriptionID string `json:"subscription"`
@@ -260,7 +286,7 @@ func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, db *database
 	return db.UpdateUserStripe(ctx, session.ClientRefID, session.CustomerID, session.SubscriptionID)
 }
 
-func (s *StripeClient) handleSubscriptionCreated(ctx context.Context, db *database.DB, data json.RawMessage) error {
+func (s *StripeClient) handleSubscriptionCreated(ctx context.Context, db BillingDB, data json.RawMessage) error {
 	var sub struct {
 		ID         string `json:"id"`
 		CustomerID string `json:"customer"`
@@ -287,15 +313,19 @@ func (s *StripeClient) handleSubscriptionCreated(ctx context.Context, db *databa
 		return nil // User not found, may be a new customer flow
 	}
 
+	if len(sub.Items.Data) == 0 {
+		return nil // No items in subscription
+	}
+
 	plan := mapPriceIDToPlan(sub.Items.Data[0].Price.ID)
 	return db.UpdateUserPlan(ctx, user.ID, plan)
 }
 
-func (s *StripeClient) handleSubscriptionUpdated(ctx context.Context, db *database.DB, data json.RawMessage) error {
+func (s *StripeClient) handleSubscriptionUpdated(ctx context.Context, db BillingDB, data json.RawMessage) error {
 	return s.handleSubscriptionCreated(ctx, db, data) // Same logic
 }
 
-func (s *StripeClient) handleSubscriptionDeleted(ctx context.Context, db *database.DB, data json.RawMessage) error {
+func (s *StripeClient) handleSubscriptionDeleted(ctx context.Context, db BillingDB, data json.RawMessage) error {
 	var sub struct {
 		CustomerID string `json:"customer"`
 	}
@@ -311,12 +341,12 @@ func (s *StripeClient) handleSubscriptionDeleted(ctx context.Context, db *databa
 	return db.UpdateUserPlan(ctx, user.ID, "free")
 }
 
-func (s *StripeClient) handlePaymentSucceeded(ctx context.Context, db *database.DB, data json.RawMessage) error {
+func (s *StripeClient) handlePaymentSucceeded(ctx context.Context, db BillingDB, data json.RawMessage) error {
 	// Could send confirmation email or update payment status
 	return nil
 }
 
-func (s *StripeClient) handlePaymentFailed(ctx context.Context, db *database.DB, data json.RawMessage) error {
+func (s *StripeClient) handlePaymentFailed(ctx context.Context, db BillingDB, data json.RawMessage) error {
 	// Could send payment failed email or downgrade user
 	return nil
 }
@@ -335,7 +365,7 @@ func mapPriceIDToPlan(priceID string) string {
 // HTTP helpers
 
 func (s *StripeClient) post(ctx context.Context, path string, data url.Values) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, "POST", stripeAPIBase+path, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", s.baseURL+path, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +373,7 @@ func (s *StripeClient) post(ctx context.Context, path string, data url.Values) (
 }
 
 func (s *StripeClient) get(ctx context.Context, path string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", stripeAPIBase+path, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", s.baseURL+path, nil)
 	if err != nil {
 		return nil, err
 	}
