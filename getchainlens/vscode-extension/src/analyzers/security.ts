@@ -231,7 +231,7 @@ class ReentrancyPattern implements SecurityPattern {
 
 // Unchecked low-level call
 class UncheckedCallPattern implements SecurityPattern {
-    check(ast: ASTNode, sourceCode: string): SecurityIssue[] {
+    check(_ast: ASTNode, _sourceCode: string): SecurityIssue[] {
         // Implemented in line-based analysis
         return [];
     }
@@ -239,7 +239,7 @@ class UncheckedCallPattern implements SecurityPattern {
 
 // tx.origin authentication
 class TxOriginPattern implements SecurityPattern {
-    check(ast: ASTNode, sourceCode: string): SecurityIssue[] {
+    check(_ast: ASTNode, _sourceCode: string): SecurityIssue[] {
         // Implemented in line-based analysis
         return [];
     }
@@ -247,7 +247,7 @@ class TxOriginPattern implements SecurityPattern {
 
 // Integer overflow (pre-0.8.0)
 class IntegerOverflowPattern implements SecurityPattern {
-    check(ast: ASTNode, sourceCode: string): SecurityIssue[] {
+    check(_ast: ASTNode, sourceCode: string): SecurityIssue[] {
         const issues: SecurityIssue[] = [];
 
         // Check pragma version
@@ -288,7 +288,7 @@ class IntegerOverflowPattern implements SecurityPattern {
 
 // Timestamp dependency
 class TimestampDependencyPattern implements SecurityPattern {
-    check(ast: ASTNode, sourceCode: string): SecurityIssue[] {
+    check(_ast: ASTNode, _sourceCode: string): SecurityIssue[] {
         // Implemented in line-based analysis
         return [];
     }
@@ -296,7 +296,7 @@ class TimestampDependencyPattern implements SecurityPattern {
 
 // Dangerous delegatecall
 class DelegateCallPattern implements SecurityPattern {
-    check(ast: ASTNode, sourceCode: string): SecurityIssue[] {
+    check(_ast: ASTNode, _sourceCode: string): SecurityIssue[] {
         // Implemented in line-based analysis
         return [];
     }
@@ -304,7 +304,7 @@ class DelegateCallPattern implements SecurityPattern {
 
 // Unprotected selfdestruct
 class SelfDestructPattern implements SecurityPattern {
-    check(ast: ASTNode, sourceCode: string): SecurityIssue[] {
+    check(_ast: ASTNode, _sourceCode: string): SecurityIssue[] {
         // Implemented in line-based analysis
         return [];
     }

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { GasAnalyzer, GasEstimate, GasReport } from '../analyzers/gas';
+import { GasAnalyzer } from '../analyzers/gas';
 
 suite('GasAnalyzer Test Suite', () => {
     let analyzer: GasAnalyzer;

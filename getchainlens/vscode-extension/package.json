@@ -1,0 +1,263 @@
+{
+  "name": "getchainlens",
+  "displayName": "GetChainLens - Smart Contract Security & Gas Analyzer",
+  "description": "Production-grade security analysis, gas optimization, and debugging for Solidity smart contracts. Detect vulnerabilities, estimate gas costs, and trace transactions.",
+  "version": "1.0.0",
+  "publisher": "getchainlens",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/getchainlens/vscode-extension"
+  },
+  "homepage": "https://getchainlens.com",
+  "bugs": {
+    "url": "https://github.com/getchainlens/vscode-extension/issues"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "solidity",
+    "ethereum",
+    "smart contracts",
+    "security",
+    "blockchain",
+    "web3",
+    "defi",
+    "gas optimization",
+    "reentrancy",
+    "audit",
+    "polygon",
+    "arbitrum",
+    "optimism",
+    "base",
+    "foundry",
+    "hardhat"
+  ],
+  "activationEvents": [
+    "onLanguage:solidity",
+    "workspaceContains:**/*.sol"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "solidity",
+        "extensions": [".sol"],
+        "aliases": ["Solidity", "solidity"]
+      }
+    ],
+    "commands": [
+      {
+        "command": "getchainlens.analyzeFile",
+        "title": "GetChainLens: Analyze Current File",
+        "icon": "$(search)"
+      },
+      {
+        "command": "getchainlens.analyzeWorkspace",
+        "title": "GetChainLens: Analyze All Contracts",
+        "icon": "$(folder)"
+      },
+      {
+        "command": "getchainlens.showGasReport",
+        "title": "GetChainLens: Show Gas Report",
+        "icon": "$(flame)"
+      },
+      {
+        "command": "getchainlens.showSecurityReport",
+        "title": "GetChainLens: Show Security Report",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "getchainlens.traceTransaction",
+        "title": "GetChainLens: Trace Transaction",
+        "icon": "$(debug-step-into)"
+      },
+      {
+        "command": "getchainlens.login",
+        "title": "GetChainLens: Login"
+      },
+      {
+        "command": "getchainlens.logout",
+        "title": "GetChainLens: Logout"
+      },
+      {
+        "command": "getchainlens.showStatus",
+        "title": "GetChainLens: Account Status"
+      },
+      {
+        "command": "getchainlens.analyzeWithBackend",
+        "title": "GetChainLens: Deep Analysis (Cloud)",
+        "icon": "$(cloud)"
+      },
+      {
+        "command": "getchainlens.simulateTransaction",
+        "title": "GetChainLens: Simulate Transaction",
+        "icon": "$(play)"
+      }
+    ],
+    "configuration": {
+      "title": "GetChainLens",
+      "properties": {
+        "getchainlens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable GetChainLens analysis"
+        },
+        "getchainlens.analyzeOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically analyze files on save"
+        },
+        "getchainlens.analyzeOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically analyze files when opened"
+        },
+        "getchainlens.securityLevel": {
+          "type": "string",
+          "enum": ["info", "warning", "error"],
+          "default": "warning",
+          "description": "Minimum severity level to display"
+        },
+        "getchainlens.showGasEstimates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline gas estimates via CodeLens"
+        },
+        "getchainlens.showCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show CodeLens annotations above functions"
+        },
+        "getchainlens.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "GetChainLens API key for cloud features (optional)"
+        },
+        "getchainlens.rpcUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Custom RPC URL for transaction tracing"
+        },
+        "getchainlens.defaultChain": {
+          "type": "string",
+          "enum": ["ethereum", "polygon", "arbitrum", "optimism", "base"],
+          "default": "ethereum",
+          "description": "Default chain for transaction operations"
+        }
+      }
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "getchainlensContracts",
+          "name": "GetChainLens Contracts",
+          "when": "getchainlens.enabled"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "getchainlens",
+          "title": "GetChainLens",
+          "icon": "images/icon.svg"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "getchainlens.analyzeFile",
+          "when": "resourceLangId == solidity",
+          "group": "getchainlens@1"
+        },
+        {
+          "command": "getchainlens.showSecurityReport",
+          "when": "resourceLangId == solidity",
+          "group": "getchainlens@2"
+        },
+        {
+          "command": "getchainlens.showGasReport",
+          "when": "resourceLangId == solidity",
+          "group": "getchainlens@3"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "getchainlens.analyzeFile",
+          "when": "resourceLangId == solidity",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "getchainlens.analyzeFile",
+          "when": "resourceLangId == solidity"
+        },
+        {
+          "command": "getchainlens.showSecurityReport",
+          "when": "resourceLangId == solidity"
+        },
+        {
+          "command": "getchainlens.showGasReport",
+          "when": "resourceLangId == solidity"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "getchainlens.analyzeFile",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "resourceLangId == solidity"
+      },
+      {
+        "command": "getchainlens.showSecurityReport",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+shift+s",
+        "when": "resourceLangId == solidity"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "lint:fix": "eslint src --ext ts --fix",
+    "test": "node ./out/test/runTest.js",
+    "test:unit": "mocha --require ts-node/register --ui tdd 'src/**/*.test.ts'",
+    "package": "vsce package",
+    "publish": "vsce publish",
+    "clean": "rm -rf out"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "eslint": "^8.55.0",
+    "glob": "^10.3.10",
+    "mocha": "^10.2.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "@solidity-parser/parser": "^0.18.0",
+    "axios": "^1.6.7"
+  }
+}

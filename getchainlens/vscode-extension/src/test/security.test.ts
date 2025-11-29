@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { SecurityAnalyzer, SecurityIssue } from '../analyzers/security';
+import { SecurityAnalyzer } from '../analyzers/security';
 
 suite('SecurityAnalyzer Test Suite', () => {
     let analyzer: SecurityAnalyzer;

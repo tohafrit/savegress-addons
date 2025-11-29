@@ -80,7 +80,7 @@ export class GasAnalyzer {
         };
     }
 
-    private estimateFunction(node: ASTNode, sourceCode: string): GasEstimate | null {
+    private estimateFunction(node: ASTNode, _sourceCode: string): GasEstimate | null {
         const name = node.name as string;
         if (!name) return null;
 

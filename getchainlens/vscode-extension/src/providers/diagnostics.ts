@@ -29,7 +29,7 @@ export class DiagnosticsProvider {
         }
 
         // Gas analysis (only warnings for high gas functions)
-        const config = vscode.workspace.getConfiguration('chainlens');
+        const config = vscode.workspace.getConfiguration('getchainlens');
         if (config.get('showGasEstimates')) {
             const gasEstimates = this.gasAnalyzer.analyze(sourceCode);
             for (const estimate of gasEstimates) {
@@ -59,12 +59,12 @@ export class DiagnosticsProvider {
 
         const diagnostic = new vscode.Diagnostic(
             range,
-            `[ChainLens] ${issue.message}`,
+            `[GetChainLens] ${issue.message}`,
             severity
         );
 
         diagnostic.code = issue.type;
-        diagnostic.source = 'ChainLens Security';
+        diagnostic.source = 'GetChainLens Security';
 
         // Add related information with suggestion
         if (issue.suggestion) {
@@ -88,7 +88,7 @@ export class DiagnosticsProvider {
             new vscode.Position(line, lineText.length)
         );
 
-        const message = `[ChainLens] High gas function: ${estimate.name} (~${estimate.estimatedGas.toLocaleString()} gas)`;
+        const message = `[GetChainLens] High gas function: ${estimate.name} (~${estimate.estimatedGas.toLocaleString()} gas)`;
 
         const diagnostic = new vscode.Diagnostic(
             range,
@@ -97,7 +97,7 @@ export class DiagnosticsProvider {
         );
 
         diagnostic.code = 'HIGH_GAS';
-        diagnostic.source = 'ChainLens Gas';
+        diagnostic.source = 'GetChainLens Gas';
 
         if (estimate.suggestions.length > 0) {
             diagnostic.relatedInformation = estimate.suggestions.map(suggestion =>

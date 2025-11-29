@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GasAnalyzer, GasEstimate } from '../analyzers/gas';
+import { GasAnalyzer } from '../analyzers/gas';
 
 export class CodeLensProvider implements vscode.CodeLensProvider {
     private gasAnalyzer: GasAnalyzer;
@@ -19,7 +19,7 @@ export class CodeLensProvider implements vscode.CodeLensProvider {
         document: vscode.TextDocument,
         _token: vscode.CancellationToken
     ): vscode.ProviderResult<vscode.CodeLens[]> {
-        const config = vscode.workspace.getConfiguration('chainlens');
+        const config = vscode.workspace.getConfiguration('getchainlens');
         if (!config.get('showGasEstimates')) {
             return [];
         }
@@ -41,7 +41,7 @@ export class CodeLensProvider implements vscode.CodeLensProvider {
             const gasIcon = this.getGasIcon(estimate.level);
             const gasLens = new vscode.CodeLens(range, {
                 title: `${gasIcon} ~${estimate.estimatedGas.toLocaleString()} gas`,
-                command: 'chainlens.showGasReport',
+                command: 'getchainlens.showGasReport',
                 tooltip: `Estimated gas for ${estimate.name}. Click for detailed report.`,
             });
             codeLenses.push(gasLens);
@@ -50,7 +50,7 @@ export class CodeLensProvider implements vscode.CodeLensProvider {
             if (estimate.suggestions.length > 0) {
                 const suggestionLens = new vscode.CodeLens(range, {
                     title: `💡 ${estimate.suggestions.length} optimization${estimate.suggestions.length > 1 ? 's' : ''}`,
-                    command: 'chainlens.showGasReport',
+                    command: 'getchainlens.showGasReport',
                     tooltip: estimate.suggestions.join('\n'),
                 });
                 codeLenses.push(suggestionLens);
@@ -68,8 +68,8 @@ export class CodeLensProvider implements vscode.CodeLensProvider {
 
             const report = this.gasAnalyzer.generateReport(sourceCode);
             codeLenses.push(new vscode.CodeLens(range, {
-                title: `📊 ChainLens | ${estimates.length} functions | ~${report.totalDeploymentGas.toLocaleString()} gas deployment`,
-                command: 'chainlens.showGasReport',
+                title: `📊 GetChainLens | ${estimates.length} functions | ~${report.totalDeploymentGas.toLocaleString()} gas deployment`,
+                command: 'getchainlens.showGasReport',
                 tooltip: 'Click for full gas report',
             }));
         }

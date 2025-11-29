@@ -1,7 +1,10 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosRequestConfig } from 'axios';
 import * as vscode from 'vscode';
 
-const API_BASE_URL = 'https://api.chainlens.dev';
+const API_BASE_URL = 'https://api.getchainlens.com';
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
+const RETRY_STATUS_CODES = [408, 429, 500, 502, 503, 504];
 
 // =============================================================================
 // Types
@@ -179,6 +182,9 @@ export class ApiClient {
     private accessToken: string = '';
     private refreshToken: string = '';
     private context: vscode.ExtensionContext | null = null;
+    private secretStorage: vscode.SecretStorage | null = null;
+    private isRefreshing: boolean = false;
+    private refreshPromise: Promise<{ access_token: string; refresh_token: string }> | null = null;
 
     constructor(accessToken: string = '') {
         this.accessToken = accessToken;
@@ -187,6 +193,8 @@ export class ApiClient {
             timeout: 30000,
             headers: {
                 'Content-Type': 'application/json',
+                'X-Client': 'getchainlens-vscode',
+                'X-Client-Version': '1.0.0',
             },
         });
 
@@ -202,52 +210,145 @@ export class ApiClient {
             return config;
         });
 
-        // Response interceptor - handle token refresh
+        // Response interceptor - handle token refresh and retries
         this.client.interceptors.response.use(
             (response) => response,
             async (error: AxiosError) => {
-                const originalRequest = error.config;
+                const originalRequest = error.config as AxiosRequestConfig & { _retryCount?: number; _isRetry?: boolean };
 
-                if (error.response?.status === 401 && this.refreshToken && originalRequest) {
+                if (!originalRequest) {
+                    return Promise.reject(error);
+                }
+
+                // Handle 401 - token refresh
+                if (error.response?.status === 401 && this.refreshToken && !originalRequest._isRetry) {
+                    originalRequest._isRetry = true;
                     try {
-                        const tokens = await this.refreshAccessToken();
-                        this.setTokens(tokens.access_token, tokens.refresh_token);
+                        const tokens = await this.refreshAccessTokenWithLock();
+                        await this.setTokens(tokens.access_token, tokens.refresh_token);
+                        originalRequest.headers = originalRequest.headers || {};
                         originalRequest.headers.Authorization = `Bearer ${tokens.access_token}`;
                         return this.client(originalRequest);
                     } catch {
                         // Refresh failed, clear tokens
-                        this.clearTokens();
+                        await this.clearTokens();
                     }
                 }
+
+                // Handle retryable errors with exponential backoff
+                if (error.response && RETRY_STATUS_CODES.includes(error.response.status)) {
+                    const retryCount = originalRequest._retryCount || 0;
+                    if (retryCount < MAX_RETRIES) {
+                        originalRequest._retryCount = retryCount + 1;
+                        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, retryCount);
+
+                        // Add jitter to prevent thundering herd
+                        const jitter = Math.random() * delay * 0.1;
+                        await this.sleep(delay + jitter);
+
+                        return this.client(originalRequest);
+                    }
+                }
+
                 return Promise.reject(error);
             }
         );
     }
 
-    setContext(context: vscode.ExtensionContext): void {
-        this.context = context;
-        // Load saved tokens
-        const savedToken = context.globalState.get<string>('chainlens.accessToken');
-        const savedRefresh = context.globalState.get<string>('chainlens.refreshToken');
-        if (savedToken) this.accessToken = savedToken;
-        if (savedRefresh) this.refreshToken = savedRefresh;
+    private sleep(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    setTokens(accessToken: string, refreshToken: string): void {
-        this.accessToken = accessToken;
-        this.refreshToken = refreshToken;
-        if (this.context) {
-            this.context.globalState.update('chainlens.accessToken', accessToken);
-            this.context.globalState.update('chainlens.refreshToken', refreshToken);
+    // Ensure only one refresh request at a time
+    private async refreshAccessTokenWithLock(): Promise<{ access_token: string; refresh_token: string }> {
+        if (this.isRefreshing && this.refreshPromise) {
+            return this.refreshPromise;
+        }
+
+        this.isRefreshing = true;
+        this.refreshPromise = this.refreshAccessToken();
+
+        try {
+            const result = await this.refreshPromise;
+            return result;
+        } finally {
+            this.isRefreshing = false;
+            this.refreshPromise = null;
         }
     }
 
-    clearTokens(): void {
+    async setContext(context: vscode.ExtensionContext): Promise<void> {
+        this.context = context;
+        this.secretStorage = context.secrets;
+
+        // Load tokens from secure storage
+        await this.loadTokensFromStorage();
+    }
+
+    private async loadTokensFromStorage(): Promise<void> {
+        if (this.secretStorage) {
+            // Try secure storage first
+            const savedToken = await this.secretStorage.get('getchainlens.accessToken');
+            const savedRefresh = await this.secretStorage.get('getchainlens.refreshToken');
+            if (savedToken) this.accessToken = savedToken;
+            if (savedRefresh) this.refreshToken = savedRefresh;
+        } else if (this.context) {
+            // Fallback to global state (less secure, for migration)
+            const savedToken = this.context.globalState.get<string>('getchainlens.accessToken');
+            const savedRefresh = this.context.globalState.get<string>('getchainlens.refreshToken');
+            if (savedToken) this.accessToken = savedToken;
+            if (savedRefresh) this.refreshToken = savedRefresh;
+
+            // Migrate to secure storage if tokens exist
+            if (savedToken || savedRefresh) {
+                await this.migrateToSecureStorage();
+            }
+        }
+    }
+
+    private async migrateToSecureStorage(): Promise<void> {
+        if (this.secretStorage && this.context) {
+            // Save to secure storage
+            if (this.accessToken) {
+                await this.secretStorage.store('getchainlens.accessToken', this.accessToken);
+            }
+            if (this.refreshToken) {
+                await this.secretStorage.store('getchainlens.refreshToken', this.refreshToken);
+            }
+
+            // Remove from global state
+            await this.context.globalState.update('getchainlens.accessToken', undefined);
+            await this.context.globalState.update('getchainlens.refreshToken', undefined);
+        }
+    }
+
+    async setTokens(accessToken: string, refreshToken: string): Promise<void> {
+        this.accessToken = accessToken;
+        this.refreshToken = refreshToken;
+
+        if (this.secretStorage) {
+            // Use secure storage (preferred)
+            await this.secretStorage.store('getchainlens.accessToken', accessToken);
+            await this.secretStorage.store('getchainlens.refreshToken', refreshToken);
+        } else if (this.context) {
+            // Fallback to global state
+            await this.context.globalState.update('getchainlens.accessToken', accessToken);
+            await this.context.globalState.update('getchainlens.refreshToken', refreshToken);
+        }
+    }
+
+    async clearTokens(): Promise<void> {
         this.accessToken = '';
         this.refreshToken = '';
+
+        if (this.secretStorage) {
+            await this.secretStorage.delete('getchainlens.accessToken');
+            await this.secretStorage.delete('getchainlens.refreshToken');
+        }
+
         if (this.context) {
-            this.context.globalState.update('chainlens.accessToken', undefined);
-            this.context.globalState.update('chainlens.refreshToken', undefined);
+            await this.context.globalState.update('getchainlens.accessToken', undefined);
+            await this.context.globalState.update('getchainlens.refreshToken', undefined);
         }
     }
 
@@ -264,7 +365,7 @@ export class ApiClient {
             email,
             password,
         });
-        this.setTokens(response.data.access_token, response.data.refresh_token);
+        await this.setTokens(response.data.access_token, response.data.refresh_token);
         return response.data;
     }
 
@@ -274,12 +375,21 @@ export class ApiClient {
             password,
             name,
         });
-        this.setTokens(response.data.access_token, response.data.refresh_token);
+        await this.setTokens(response.data.access_token, response.data.refresh_token);
         return response.data;
     }
 
     async logout(): Promise<void> {
-        this.clearTokens();
+        try {
+            // Optionally notify the server about logout
+            if (this.isAuthenticated()) {
+                await this.client.post('/api/v1/auth/logout').catch(() => {
+                    // Ignore server errors on logout
+                });
+            }
+        } finally {
+            await this.clearTokens();
+        }
     }
 
     private async refreshAccessToken(): Promise<{ access_token: string; refresh_token: string }> {
@@ -555,8 +665,8 @@ export function getApiClient(): ApiClient {
     return apiClientInstance;
 }
 
-export function initializeApiClient(context: vscode.ExtensionContext): ApiClient {
+export async function initializeApiClient(context: vscode.ExtensionContext): Promise<ApiClient> {
     const client = getApiClient();
-    client.setContext(context);
+    await client.setContext(context);
     return client;
 }

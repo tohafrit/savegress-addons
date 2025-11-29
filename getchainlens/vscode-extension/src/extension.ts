@@ -5,25 +5,34 @@ import { DiagnosticsProvider } from './providers/diagnostics';
 import { HoverProvider } from './providers/hover';
 import { CodeLensProvider } from './providers/codelens';
 import { ContractsTreeProvider } from './views/contracts';
-import { ApiClient, initializeApiClient, getApiClient } from './services/api';
+import { ApiClient, initializeApiClient } from './services/api';
 
 let diagnosticsProvider: DiagnosticsProvider;
 let securityAnalyzer: SecurityAnalyzer;
 let gasAnalyzer: GasAnalyzer;
 let apiClient: ApiClient;
 
-export function activate(context: vscode.ExtensionContext) {
-    console.log('ChainLens is now active!');
+export async function activate(context: vscode.ExtensionContext) {
+    console.log('GetChainLens is now active!');
+
+    // Get configuration
+    const config = vscode.workspace.getConfiguration('getchainlens');
+
+    // Check if extension is enabled
+    if (!config.get('enabled', true)) {
+        console.log('GetChainLens is disabled in settings');
+        return;
+    }
 
     // Initialize analyzers
     securityAnalyzer = new SecurityAnalyzer();
     gasAnalyzer = new GasAnalyzer();
 
     // Initialize API client with context for token persistence
-    apiClient = initializeApiClient(context);
+    apiClient = await initializeApiClient(context);
 
     // Initialize diagnostics
-    const diagnosticCollection = vscode.languages.createDiagnosticCollection('chainlens');
+    const diagnosticCollection = vscode.languages.createDiagnosticCollection('getchainlens');
     diagnosticsProvider = new DiagnosticsProvider(
         diagnosticCollection,
         securityAnalyzer,
@@ -45,21 +54,21 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Register tree view
     const contractsProvider = new ContractsTreeProvider();
-    vscode.window.registerTreeDataProvider('chainlensContracts', contractsProvider);
+    vscode.window.registerTreeDataProvider('getchainlensContracts', contractsProvider);
 
     // Register commands
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.analyzeFile', () => {
+        vscode.commands.registerCommand('getchainlens.analyzeFile', () => {
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'solidity') {
                 diagnosticsProvider.analyzeDocument(editor.document);
-                vscode.window.showInformationMessage('ChainLens: Analysis complete');
+                vscode.window.showInformationMessage('GetChainLens: Analysis complete');
             }
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.analyzeWorkspace', async () => {
+        vscode.commands.registerCommand('getchainlens.analyzeWorkspace', async () => {
             const files = await vscode.workspace.findFiles('**/*.sol');
             let analyzed = 0;
             for (const file of files) {
@@ -67,12 +76,12 @@ export function activate(context: vscode.ExtensionContext) {
                 diagnosticsProvider.analyzeDocument(doc);
                 analyzed++;
             }
-            vscode.window.showInformationMessage(`ChainLens: Analyzed ${analyzed} contracts`);
+            vscode.window.showInformationMessage(`GetChainLens: Analyzed ${analyzed} contracts`);
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.showGasReport', () => {
+        vscode.commands.registerCommand('getchainlens.showGasReport', () => {
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'solidity') {
                 showGasReport(editor.document);
@@ -81,7 +90,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.showSecurityReport', () => {
+        vscode.commands.registerCommand('getchainlens.showSecurityReport', () => {
             const editor = vscode.window.activeTextEditor;
             if (editor && editor.document.languageId === 'solidity') {
                 showSecurityReport(editor.document);
@@ -90,7 +99,7 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.traceTransaction', async () => {
+        vscode.commands.registerCommand('getchainlens.traceTransaction', async () => {
             const txHash = await vscode.window.showInputBox({
                 prompt: 'Enter transaction hash',
                 placeHolder: '0x...'
@@ -103,32 +112,32 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Auth commands
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.login', async () => {
+        vscode.commands.registerCommand('getchainlens.login', async () => {
             await loginCommand();
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.logout', async () => {
+        vscode.commands.registerCommand('getchainlens.logout', async () => {
             apiClient.logout();
-            vscode.window.showInformationMessage('ChainLens: Logged out successfully');
+            vscode.window.showInformationMessage('GetChainLens: Logged out successfully');
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.showStatus', async () => {
+        vscode.commands.registerCommand('getchainlens.showStatus', async () => {
             await showAccountStatus();
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.analyzeWithBackend', async () => {
+        vscode.commands.registerCommand('getchainlens.analyzeWithBackend', async () => {
             await analyzeWithBackend();
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('chainlens.simulateTransaction', async () => {
+        vscode.commands.registerCommand('getchainlens.simulateTransaction', async () => {
             await simulateTransactionCommand();
         })
     );
@@ -163,8 +172,8 @@ async function showGasReport(document: vscode.TextDocument) {
     const report = gasAnalyzer.generateReport(document.getText());
 
     const panel = vscode.window.createWebviewPanel(
-        'chainlensGasReport',
-        'ChainLens Gas Report',
+        'getchainlensGasReport',
+        'GetChainLens Gas Report',
         vscode.ViewColumn.Beside,
         {}
     );
@@ -203,8 +212,8 @@ async function showSecurityReport(document: vscode.TextDocument) {
     const issues = securityAnalyzer.analyze(document.getText());
 
     const panel = vscode.window.createWebviewPanel(
-        'chainlensSecurityReport',
-        'ChainLens Security Report',
+        'getchainlensSecurityReport',
+        'GetChainLens Security Report',
         vscode.ViewColumn.Beside,
         {}
     );
@@ -264,9 +273,9 @@ async function traceTransaction(txHash: string) {
             'Register'
         );
         if (action === 'Login') {
-            vscode.commands.executeCommand('chainlens.login');
+            vscode.commands.executeCommand('getchainlens.login');
         } else if (action === 'Register') {
-            vscode.env.openExternal(vscode.Uri.parse('https://chainlens.dev/signup'));
+            vscode.env.openExternal(vscode.Uri.parse('https://getchainlens.com/signup'));
         }
         return;
     }
@@ -293,7 +302,7 @@ async function traceTransaction(txHash: string) {
 
 function showTraceResult(trace: any) {
     const panel = vscode.window.createWebviewPanel(
-        'chainlensTrace',
+        'getchainlensTrace',
         `Trace: ${trace.tx_hash.slice(0, 10)}...`,
         vscode.ViewColumn.Beside,
         {}
@@ -396,7 +405,7 @@ async function loginCommand() {
 
     try {
         const result = await apiClient.login(email, password);
-        vscode.window.showInformationMessage(`ChainLens: Welcome, ${result.user.name}!`);
+        vscode.window.showInformationMessage(`GetChainLens: Welcome, ${result.user.name}!`);
     } catch (error: any) {
         const message = error.response?.data?.error || error.message;
         vscode.window.showErrorMessage(`Login failed: ${message}`);
@@ -405,7 +414,7 @@ async function loginCommand() {
 
 async function showAccountStatus() {
     if (!apiClient.isAuthenticated()) {
-        vscode.window.showWarningMessage('ChainLens: Not logged in');
+        vscode.window.showWarningMessage('GetChainLens: Not logged in');
         return;
     }
 
@@ -414,8 +423,8 @@ async function showAccountStatus() {
         const usage = await apiClient.getUsage();
 
         const panel = vscode.window.createWebviewPanel(
-            'chainlensAccount',
-            'ChainLens Account',
+            'getchainlensAccount',
+            'GetChainLens Account',
             vscode.ViewColumn.One,
             {}
         );
@@ -483,7 +492,7 @@ async function analyzeWithBackend() {
 
     vscode.window.withProgress({
         location: vscode.ProgressLocation.Notification,
-        title: 'Analyzing contract with ChainLens...',
+        title: 'Analyzing contract with GetChainLens...',
         cancellable: false
     }, async () => {
         try {
@@ -502,12 +511,12 @@ async function analyzeWithBackend() {
                         : vscode.DiagnosticSeverity.Information;
 
                 const diagnostic = new vscode.Diagnostic(range, issue.message, severity);
-                diagnostic.source = 'ChainLens';
+                diagnostic.source = 'GetChainLens';
                 diagnostic.code = issue.id;
                 return diagnostic;
             });
 
-            const collection = vscode.languages.createDiagnosticCollection('chainlens-backend');
+            const collection = vscode.languages.createDiagnosticCollection('getchainlens-backend');
             collection.set(editor.document.uri, diagnostics);
 
             // Show summary
@@ -578,5 +587,5 @@ async function simulateTransactionCommand() {
 }
 
 export function deactivate() {
-    console.log('ChainLens deactivated');
+    console.log('GetChainLens deactivated');
 }
