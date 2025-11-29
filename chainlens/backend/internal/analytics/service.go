@@ -11,7 +11,7 @@ import (
 
 // Service provides analytics business logic
 type Service struct {
-	repo       *Repository
+	repo       RepositoryInterface
 	rpcClients map[string]RPCClient
 
 	// Background aggregation
@@ -25,7 +25,7 @@ type RPCClient interface {
 }
 
 // NewService creates a new analytics service
-func NewService(repo *Repository) *Service {
+func NewService(repo RepositoryInterface) *Service {
 	return &Service{
 		repo:       repo,
 		rpcClients: make(map[string]RPCClient),

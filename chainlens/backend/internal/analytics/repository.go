@@ -9,10 +9,51 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// RepositoryInterface defines the interface for analytics repository operations
+type RepositoryInterface interface {
+	// Daily Stats
+	GetDailyStats(ctx context.Context, network string, startDate, endDate time.Time) ([]*DailyStats, error)
+	GetDailyStatsForDate(ctx context.Context, network string, date time.Time) (*DailyStats, error)
+	UpsertDailyStats(ctx context.Context, s *DailyStats) error
+
+	// Hourly Stats
+	GetHourlyStats(ctx context.Context, network string, startTime, endTime time.Time) ([]*HourlyStats, error)
+	UpsertHourlyStats(ctx context.Context, s *HourlyStats) error
+
+	// Gas Prices
+	GetLatestGasPrice(ctx context.Context, network string) (*GasPrice, error)
+	GetGasPriceHistory(ctx context.Context, network string, startTime, endTime time.Time, limit int) ([]*GasPrice, error)
+	InsertGasPrice(ctx context.Context, g *GasPrice) error
+
+	// Network Overview
+	GetNetworkOverview(ctx context.Context, network string) (*NetworkOverview, error)
+	UpdateNetworkOverview(ctx context.Context, o *NetworkOverview) error
+
+	// Top Tokens
+	GetTopTokens(ctx context.Context, network string, date time.Time, limit int) ([]*TopToken, error)
+	UpsertTopToken(ctx context.Context, t *TopToken) error
+
+	// Top Contracts
+	GetTopContracts(ctx context.Context, network string, date time.Time, limit int) ([]*TopContract, error)
+	UpsertTopContract(ctx context.Context, c *TopContract) error
+
+	// Aggregation
+	AggregateDailyStats(ctx context.Context, network string, date time.Time) error
+	RefreshNetworkOverview(ctx context.Context, network string) error
+
+	// Charts
+	GetTransactionCountChart(ctx context.Context, network string, days int) ([]ChartDataPoint, error)
+	GetGasPriceChart(ctx context.Context, network string, hours int) ([]ChartDataPoint, error)
+	GetActiveAddressesChart(ctx context.Context, network string, days int) ([]ChartDataPoint, error)
+}
+
 // Repository provides database operations for analytics
 type Repository struct {
 	db *pgxpool.Pool
 }
+
+// Ensure Repository implements RepositoryInterface
+var _ RepositoryInterface = (*Repository)(nil)
 
 // NewRepository creates a new analytics repository
 func NewRepository(db *pgxpool.Pool) *Repository {

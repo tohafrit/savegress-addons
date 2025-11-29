@@ -10,6 +10,29 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// RepositoryInterface defines the interface for internal transaction data operations
+type RepositoryInterface interface {
+	// Internal Transactions
+	InsertInternalTransaction(ctx context.Context, tx *InternalTransaction) error
+	InsertInternalTransactionsBatch(ctx context.Context, txs []*InternalTransaction) error
+	GetByTxHash(ctx context.Context, network, txHash string) ([]*InternalTransaction, error)
+	GetByAddress(ctx context.Context, filter *InternalTxFilter) ([]*InternalTransaction, error)
+	GetCreatedContracts(ctx context.Context, network string, limit, offset int) ([]*InternalTransaction, error)
+	GetCallStats(ctx context.Context, network, txHash string) (*CallStats, error)
+	DeleteByTxHash(ctx context.Context, network, txHash string) error
+
+	// Trace Processing Status
+	GetOrCreateProcessingStatus(ctx context.Context, network, txHash string, blockNumber int64) (*TraceProcessingStatus, error)
+	UpdateProcessingStatus(ctx context.Context, network, txHash, status string, errorMsg *string) error
+	GetPendingTraces(ctx context.Context, network string, limit int, maxRetries int) ([]*PendingTraceJob, error)
+	MarkAsProcessing(ctx context.Context, network string, txHashes []string) error
+	GetProcessingStatus(ctx context.Context, network, txHash string) (*TraceProcessingStatus, error)
+	CountByStatus(ctx context.Context, network string) (map[string]int64, error)
+}
+
+// Compile-time check that Repository implements RepositoryInterface
+var _ RepositoryInterface = (*Repository)(nil)
+
 // Repository provides database operations for internal transactions
 type Repository struct {
 	db *pgxpool.Pool

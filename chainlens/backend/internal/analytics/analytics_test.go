@@ -969,3 +969,676 @@ func TestHexToInt64Various(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// MOCK REPOSITORY
+// ============================================================================
+
+// MockRepository implements RepositoryInterface for testing
+type MockRepository struct {
+	// Data stores
+	dailyStats      map[string][]*DailyStats
+	hourlyStats     map[string][]*HourlyStats
+	gasPrices       map[string][]*GasPrice
+	networkOverview map[string]*NetworkOverview
+	topTokens       map[string][]*TopToken
+	topContracts    map[string][]*TopContract
+
+	// Error simulation
+	simulateError bool
+	errorToReturn error
+}
+
+// NewMockRepository creates a new mock repository
+func NewMockRepository() *MockRepository {
+	return &MockRepository{
+		dailyStats:      make(map[string][]*DailyStats),
+		hourlyStats:     make(map[string][]*HourlyStats),
+		gasPrices:       make(map[string][]*GasPrice),
+		networkOverview: make(map[string]*NetworkOverview),
+		topTokens:       make(map[string][]*TopToken),
+		topContracts:    make(map[string][]*TopContract),
+	}
+}
+
+// SetError configures the mock to return an error
+func (m *MockRepository) SetError(err error) {
+	m.simulateError = true
+	m.errorToReturn = err
+}
+
+// ClearError clears the error simulation
+func (m *MockRepository) ClearError() {
+	m.simulateError = false
+	m.errorToReturn = nil
+}
+
+// Daily Stats implementations
+func (m *MockRepository) GetDailyStats(ctx context.Context, network string, startDate, endDate time.Time) ([]*DailyStats, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	return m.dailyStats[network], nil
+}
+
+func (m *MockRepository) GetDailyStatsForDate(ctx context.Context, network string, date time.Time) (*DailyStats, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	stats := m.dailyStats[network]
+	for _, s := range stats {
+		if s.Date.Equal(date) {
+			return s, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) UpsertDailyStats(ctx context.Context, s *DailyStats) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.dailyStats[s.Network] = append(m.dailyStats[s.Network], s)
+	return nil
+}
+
+// Hourly Stats implementations
+func (m *MockRepository) GetHourlyStats(ctx context.Context, network string, startTime, endTime time.Time) ([]*HourlyStats, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	return m.hourlyStats[network], nil
+}
+
+func (m *MockRepository) UpsertHourlyStats(ctx context.Context, s *HourlyStats) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.hourlyStats[s.Network] = append(m.hourlyStats[s.Network], s)
+	return nil
+}
+
+// Gas Prices implementations
+func (m *MockRepository) GetLatestGasPrice(ctx context.Context, network string) (*GasPrice, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	prices := m.gasPrices[network]
+	if len(prices) == 0 {
+		return nil, nil
+	}
+	return prices[len(prices)-1], nil
+}
+
+func (m *MockRepository) GetGasPriceHistory(ctx context.Context, network string, startTime, endTime time.Time, limit int) ([]*GasPrice, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	prices := m.gasPrices[network]
+	if len(prices) > limit {
+		return prices[:limit], nil
+	}
+	return prices, nil
+}
+
+func (m *MockRepository) InsertGasPrice(ctx context.Context, g *GasPrice) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.gasPrices[g.Network] = append(m.gasPrices[g.Network], g)
+	return nil
+}
+
+// Network Overview implementations
+func (m *MockRepository) GetNetworkOverview(ctx context.Context, network string) (*NetworkOverview, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	return m.networkOverview[network], nil
+}
+
+func (m *MockRepository) UpdateNetworkOverview(ctx context.Context, o *NetworkOverview) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.networkOverview[o.Network] = o
+	return nil
+}
+
+// Top Tokens implementations
+func (m *MockRepository) GetTopTokens(ctx context.Context, network string, date time.Time, limit int) ([]*TopToken, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	tokens := m.topTokens[network]
+	if len(tokens) > limit {
+		return tokens[:limit], nil
+	}
+	return tokens, nil
+}
+
+func (m *MockRepository) UpsertTopToken(ctx context.Context, t *TopToken) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.topTokens[t.Network] = append(m.topTokens[t.Network], t)
+	return nil
+}
+
+// Top Contracts implementations
+func (m *MockRepository) GetTopContracts(ctx context.Context, network string, date time.Time, limit int) ([]*TopContract, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	contracts := m.topContracts[network]
+	if len(contracts) > limit {
+		return contracts[:limit], nil
+	}
+	return contracts, nil
+}
+
+func (m *MockRepository) UpsertTopContract(ctx context.Context, c *TopContract) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.topContracts[c.Network] = append(m.topContracts[c.Network], c)
+	return nil
+}
+
+// Aggregation implementations
+func (m *MockRepository) AggregateDailyStats(ctx context.Context, network string, date time.Time) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	return nil
+}
+
+func (m *MockRepository) RefreshNetworkOverview(ctx context.Context, network string) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	return nil
+}
+
+// Chart implementations
+func (m *MockRepository) GetTransactionCountChart(ctx context.Context, network string, days int) ([]ChartDataPoint, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var points []ChartDataPoint
+	for i := 0; i < days; i++ {
+		points = append(points, ChartDataPoint{
+			Timestamp: time.Now().AddDate(0, 0, -i),
+			Value:     float64(1000000 - i*1000),
+		})
+	}
+	return points, nil
+}
+
+func (m *MockRepository) GetGasPriceChart(ctx context.Context, network string, hours int) ([]ChartDataPoint, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var points []ChartDataPoint
+	for i := 0; i < hours; i++ {
+		points = append(points, ChartDataPoint{
+			Timestamp: time.Now().Add(-time.Duration(i) * time.Hour),
+			Value:     float64(30 + i),
+		})
+	}
+	return points, nil
+}
+
+func (m *MockRepository) GetActiveAddressesChart(ctx context.Context, network string, days int) ([]ChartDataPoint, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var points []ChartDataPoint
+	for i := 0; i < days; i++ {
+		points = append(points, ChartDataPoint{
+			Timestamp: time.Now().AddDate(0, 0, -i),
+			Value:     float64(50000 - i*100),
+		})
+	}
+	return points, nil
+}
+
+// ============================================================================
+// SERVICE TESTS WITH MOCK
+// ============================================================================
+
+func TestServiceWithMockRepo_GetNetworkOverview(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	// Set up test data
+	latestBlock := int64(18000000)
+	mockRepo.networkOverview["ethereum"] = &NetworkOverview{
+		Network:           "ethereum",
+		LatestBlock:       &latestBlock,
+		TotalBlocks:       18000000,
+		TotalTransactions: 2000000000,
+		NativeCurrency:    "ETH",
+	}
+
+	ctx := context.Background()
+	overview, err := service.GetNetworkOverview(ctx, "ethereum")
+
+	if err != nil {
+		t.Fatalf("GetNetworkOverview returned error: %v", err)
+	}
+
+	if overview == nil {
+		t.Fatal("Expected non-nil overview")
+	}
+
+	if overview.Network != "ethereum" {
+		t.Errorf("Expected network 'ethereum', got %s", overview.Network)
+	}
+
+	if *overview.LatestBlock != 18000000 {
+		t.Errorf("Expected latest block 18000000, got %d", *overview.LatestBlock)
+	}
+}
+
+func TestServiceWithMockRepo_GetNetworkOverviewNotFound(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	ctx := context.Background()
+	overview, err := service.GetNetworkOverview(ctx, "unknown")
+
+	if err != nil {
+		t.Fatalf("GetNetworkOverview returned error: %v", err)
+	}
+
+	if overview != nil {
+		t.Error("Expected nil overview for unknown network")
+	}
+}
+
+func TestServiceWithMockRepo_GetDailyStats(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	// Set up test data
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	mockRepo.dailyStats["ethereum"] = []*DailyStats{
+		{
+			Network:          "ethereum",
+			Date:             today,
+			BlockCount:       7200,
+			TransactionCount: 1200000,
+		},
+		{
+			Network:          "ethereum",
+			Date:             today.AddDate(0, 0, -1),
+			BlockCount:       7100,
+			TransactionCount: 1100000,
+		},
+	}
+
+	ctx := context.Background()
+	stats, err := service.GetDailyStats(ctx, "ethereum", today.AddDate(0, 0, -7), today)
+
+	if err != nil {
+		t.Fatalf("GetDailyStats returned error: %v", err)
+	}
+
+	if len(stats) != 2 {
+		t.Errorf("Expected 2 stats, got %d", len(stats))
+	}
+}
+
+func TestServiceWithMockRepo_GetHourlyStats(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	// Set up test data
+	now := time.Now().UTC().Truncate(time.Hour)
+	mockRepo.hourlyStats["ethereum"] = []*HourlyStats{
+		{
+			Network:          "ethereum",
+			Hour:             now,
+			BlockCount:       300,
+			TransactionCount: 50000,
+		},
+	}
+
+	ctx := context.Background()
+	stats, err := service.GetHourlyStats(ctx, "ethereum", now.Add(-24*time.Hour), now)
+
+	if err != nil {
+		t.Fatalf("GetHourlyStats returned error: %v", err)
+	}
+
+	if len(stats) != 1 {
+		t.Errorf("Expected 1 stats, got %d", len(stats))
+	}
+}
+
+func TestServiceWithMockRepo_GetCurrentGasPrice(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	// Set up test data
+	slow := int64(20_000_000_000)     // 20 gwei
+	standard := int64(30_000_000_000) // 30 gwei
+	fast := int64(50_000_000_000)     // 50 gwei
+	instant := int64(75_000_000_000)  // 75 gwei
+	baseFee := int64(25_000_000_000)  // 25 gwei
+
+	mockRepo.gasPrices["ethereum"] = []*GasPrice{
+		{
+			Network:   "ethereum",
+			Timestamp: time.Now().UTC(),
+			Slow:      &slow,
+			Standard:  &standard,
+			Fast:      &fast,
+			Instant:   &instant,
+			BaseFee:   &baseFee,
+		},
+	}
+
+	ctx := context.Background()
+	estimate, err := service.GetCurrentGasPrice(ctx, "ethereum")
+
+	if err != nil {
+		t.Fatalf("GetCurrentGasPrice returned error: %v", err)
+	}
+
+	if estimate == nil {
+		t.Fatal("Expected non-nil estimate")
+	}
+
+	if estimate.SlowGwei != 20.0 {
+		t.Errorf("Expected slow 20 gwei, got %f", estimate.SlowGwei)
+	}
+
+	if estimate.StandardGwei != 30.0 {
+		t.Errorf("Expected standard 30 gwei, got %f", estimate.StandardGwei)
+	}
+
+	if estimate.FastGwei != 50.0 {
+		t.Errorf("Expected fast 50 gwei, got %f", estimate.FastGwei)
+	}
+
+	if estimate.InstantGwei != 75.0 {
+		t.Errorf("Expected instant 75 gwei, got %f", estimate.InstantGwei)
+	}
+
+	if estimate.BaseFeeGwei != 25.0 {
+		t.Errorf("Expected base fee 25 gwei, got %f", estimate.BaseFeeGwei)
+	}
+}
+
+func TestServiceWithMockRepo_GetCurrentGasPriceNoData(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	ctx := context.Background()
+	_, err := service.GetCurrentGasPrice(ctx, "ethereum")
+
+	if err == nil {
+		t.Error("Expected error when no gas price data")
+	}
+}
+
+func TestServiceWithMockRepo_GetGasPriceHistory(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	// Set up test data
+	standard := int64(30_000_000_000)
+	for i := 0; i < 5; i++ {
+		mockRepo.gasPrices["ethereum"] = append(mockRepo.gasPrices["ethereum"], &GasPrice{
+			Network:   "ethereum",
+			Timestamp: time.Now().UTC().Add(-time.Duration(i) * time.Hour),
+			Standard:  &standard,
+		})
+	}
+
+	ctx := context.Background()
+	history, err := service.GetGasPriceHistory(ctx, "ethereum", 24)
+
+	if err != nil {
+		t.Fatalf("GetGasPriceHistory returned error: %v", err)
+	}
+
+	if len(history) != 5 {
+		t.Errorf("Expected 5 history entries, got %d", len(history))
+	}
+}
+
+func TestServiceWithMockRepo_GetTransactionChart(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	ctx := context.Background()
+	chart, err := service.GetTransactionChart(ctx, "ethereum", 30)
+
+	if err != nil {
+		t.Fatalf("GetTransactionChart returned error: %v", err)
+	}
+
+	if chart == nil {
+		t.Fatal("Expected non-nil chart")
+	}
+
+	if chart.Network != "ethereum" {
+		t.Errorf("Expected network 'ethereum', got %s", chart.Network)
+	}
+
+	if chart.MetricName != "transactions" {
+		t.Errorf("Expected metric name 'transactions', got %s", chart.MetricName)
+	}
+
+	if chart.Period != "30d" {
+		t.Errorf("Expected period '30d', got %s", chart.Period)
+	}
+
+	if len(chart.DataPoints) != 30 {
+		t.Errorf("Expected 30 data points, got %d", len(chart.DataPoints))
+	}
+}
+
+func TestServiceWithMockRepo_GetTransactionChartPeriods(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+	ctx := context.Background()
+
+	// Test 24h period
+	chart, _ := service.GetTransactionChart(ctx, "ethereum", 1)
+	if chart.Period != "24h" {
+		t.Errorf("Expected period '24h' for 1 day, got %s", chart.Period)
+	}
+
+	// Test 7d period
+	chart, _ = service.GetTransactionChart(ctx, "ethereum", 7)
+	if chart.Period != "7d" {
+		t.Errorf("Expected period '7d' for 7 days, got %s", chart.Period)
+	}
+
+	// Test 30d period
+	chart, _ = service.GetTransactionChart(ctx, "ethereum", 14)
+	if chart.Period != "30d" {
+		t.Errorf("Expected period '30d' for 14 days, got %s", chart.Period)
+	}
+}
+
+func TestServiceWithMockRepo_GetGasChart(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	ctx := context.Background()
+	chart, err := service.GetGasChart(ctx, "ethereum", 24)
+
+	if err != nil {
+		t.Fatalf("GetGasChart returned error: %v", err)
+	}
+
+	if chart == nil {
+		t.Fatal("Expected non-nil chart")
+	}
+
+	if chart.MetricName != "gas_price" {
+		t.Errorf("Expected metric name 'gas_price', got %s", chart.MetricName)
+	}
+
+	if chart.Period != "24h" {
+		t.Errorf("Expected period '24h', got %s", chart.Period)
+	}
+}
+
+func TestServiceWithMockRepo_GetGasChartPeriods(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+	ctx := context.Background()
+
+	// Test 6h period
+	chart, _ := service.GetGasChart(ctx, "ethereum", 6)
+	if chart.Period != "6h" {
+		t.Errorf("Expected period '6h' for 6 hours, got %s", chart.Period)
+	}
+
+	// Test 12h period
+	chart, _ = service.GetGasChart(ctx, "ethereum", 12)
+	if chart.Period != "12h" {
+		t.Errorf("Expected period '12h' for 12 hours, got %s", chart.Period)
+	}
+
+	// Test 24h period
+	chart, _ = service.GetGasChart(ctx, "ethereum", 24)
+	if chart.Period != "24h" {
+		t.Errorf("Expected period '24h' for 24 hours, got %s", chart.Period)
+	}
+}
+
+func TestServiceWithMockRepo_GetActiveAddressesChart(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	ctx := context.Background()
+	chart, err := service.GetActiveAddressesChart(ctx, "ethereum", 7)
+
+	if err != nil {
+		t.Fatalf("GetActiveAddressesChart returned error: %v", err)
+	}
+
+	if chart == nil {
+		t.Fatal("Expected non-nil chart")
+	}
+
+	if chart.MetricName != "active_addresses" {
+		t.Errorf("Expected metric name 'active_addresses', got %s", chart.MetricName)
+	}
+
+	if chart.Period != "7d" {
+		t.Errorf("Expected period '7d', got %s", chart.Period)
+	}
+}
+
+func TestServiceWithMockRepo_GetTopTokens(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	// Set up test data
+	tokenName := "Tether USD"
+	tokenSymbol := "USDT"
+	mockRepo.topTokens["ethereum"] = []*TopToken{
+		{
+			Network:       "ethereum",
+			Date:          time.Now().UTC().Truncate(24 * time.Hour),
+			Rank:          1,
+			TokenAddress:  "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+			TokenName:     &tokenName,
+			TokenSymbol:   &tokenSymbol,
+			TransferCount: 1000000,
+		},
+	}
+
+	ctx := context.Background()
+	tokens, err := service.GetTopTokens(ctx, "ethereum", 10)
+
+	if err != nil {
+		t.Fatalf("GetTopTokens returned error: %v", err)
+	}
+
+	if len(tokens) != 1 {
+		t.Errorf("Expected 1 token, got %d", len(tokens))
+	}
+
+	if tokens[0].Rank != 1 {
+		t.Errorf("Expected rank 1, got %d", tokens[0].Rank)
+	}
+}
+
+func TestServiceWithMockRepo_GetTopContracts(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+
+	// Set up test data
+	contractName := "Uniswap V2: Router 2"
+	mockRepo.topContracts["ethereum"] = []*TopContract{
+		{
+			Network:         "ethereum",
+			Date:            time.Now().UTC().Truncate(24 * time.Hour),
+			Rank:            1,
+			ContractAddress: "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D",
+			ContractName:    &contractName,
+			CallCount:       500000,
+		},
+	}
+
+	ctx := context.Background()
+	contracts, err := service.GetTopContracts(ctx, "ethereum", 10)
+
+	if err != nil {
+		t.Fatalf("GetTopContracts returned error: %v", err)
+	}
+
+	if len(contracts) != 1 {
+		t.Errorf("Expected 1 contract, got %d", len(contracts))
+	}
+
+	if contracts[0].Rank != 1 {
+		t.Errorf("Expected rank 1, got %d", contracts[0].Rank)
+	}
+}
+
+func TestServiceWithMockRepo_ErrorHandling(t *testing.T) {
+	mockRepo := NewMockRepository()
+	service := NewService(mockRepo)
+	ctx := context.Background()
+
+	// Simulate error
+	testErr := context.DeadlineExceeded
+	mockRepo.SetError(testErr)
+
+	// Test GetNetworkOverview with error
+	_, err := service.GetNetworkOverview(ctx, "ethereum")
+	if err != testErr {
+		t.Errorf("Expected error %v, got %v", testErr, err)
+	}
+
+	// Test GetDailyStats with error
+	_, err = service.GetDailyStats(ctx, "ethereum", time.Now(), time.Now())
+	if err != testErr {
+		t.Errorf("Expected error %v, got %v", testErr, err)
+	}
+
+	// Test GetHourlyStats with error
+	_, err = service.GetHourlyStats(ctx, "ethereum", time.Now(), time.Now())
+	if err != testErr {
+		t.Errorf("Expected error %v, got %v", testErr, err)
+	}
+
+	// Clear error
+	mockRepo.ClearError()
+
+	// Should work now
+	_, err = service.GetNetworkOverview(ctx, "ethereum")
+	if err != nil {
+		t.Errorf("Unexpected error after clearing: %v", err)
+	}
+}

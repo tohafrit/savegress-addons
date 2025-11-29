@@ -1,9 +1,380 @@
 package explorer
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
+
+// ============================================================================
+// MOCK REPOSITORY
+// ============================================================================
+
+// MockRepository implements RepositoryInterface for testing
+type MockRepository struct {
+	blocks       map[string]map[int64]*Block      // network -> blockNumber -> Block
+	blocksByHash map[string]map[string]*Block     // network -> hash -> Block
+	transactions map[string]map[string]*Transaction // network -> txHash -> Transaction
+	txsByBlock   map[string]map[int64][]Transaction // network -> blockNumber -> []Transaction
+	addresses    map[string]map[string]*Address   // network -> address -> Address
+	eventLogs    map[string]map[string][]EventLog // network -> txHash -> []EventLog
+	syncStates   map[string]*NetworkSyncState
+	networkStats map[string]*NetworkStats
+
+	// Error simulation
+	simulateError bool
+	errorToReturn error
+}
+
+// NewMockRepository creates a new mock repository
+func NewMockRepository() *MockRepository {
+	return &MockRepository{
+		blocks:       make(map[string]map[int64]*Block),
+		blocksByHash: make(map[string]map[string]*Block),
+		transactions: make(map[string]map[string]*Transaction),
+		txsByBlock:   make(map[string]map[int64][]Transaction),
+		addresses:    make(map[string]map[string]*Address),
+		eventLogs:    make(map[string]map[string][]EventLog),
+		syncStates:   make(map[string]*NetworkSyncState),
+		networkStats: make(map[string]*NetworkStats),
+	}
+}
+
+// SetError enables error simulation
+func (m *MockRepository) SetError(err error) {
+	m.simulateError = true
+	m.errorToReturn = err
+}
+
+// ClearError disables error simulation
+func (m *MockRepository) ClearError() {
+	m.simulateError = false
+	m.errorToReturn = nil
+}
+
+// AddBlock adds a block to the mock
+func (m *MockRepository) AddBlock(block *Block) {
+	if m.blocks[block.Network] == nil {
+		m.blocks[block.Network] = make(map[int64]*Block)
+	}
+	if m.blocksByHash[block.Network] == nil {
+		m.blocksByHash[block.Network] = make(map[string]*Block)
+	}
+	m.blocks[block.Network][block.BlockNumber] = block
+	m.blocksByHash[block.Network][block.BlockHash] = block
+}
+
+// AddTransaction adds a transaction to the mock
+func (m *MockRepository) AddTransaction(tx *Transaction) {
+	if m.transactions[tx.Network] == nil {
+		m.transactions[tx.Network] = make(map[string]*Transaction)
+	}
+	if m.txsByBlock[tx.Network] == nil {
+		m.txsByBlock[tx.Network] = make(map[int64][]Transaction)
+	}
+	m.transactions[tx.Network][tx.TxHash] = tx
+	m.txsByBlock[tx.Network][tx.BlockNumber] = append(m.txsByBlock[tx.Network][tx.BlockNumber], *tx)
+}
+
+// AddAddress adds an address to the mock
+func (m *MockRepository) AddAddress(addr *Address) {
+	if m.addresses[addr.Network] == nil {
+		m.addresses[addr.Network] = make(map[string]*Address)
+	}
+	m.addresses[addr.Network][addr.Address] = addr
+}
+
+// AddEventLog adds event logs for a transaction
+func (m *MockRepository) AddEventLog(network, txHash string, log EventLog) {
+	if m.eventLogs[network] == nil {
+		m.eventLogs[network] = make(map[string][]EventLog)
+	}
+	m.eventLogs[network][txHash] = append(m.eventLogs[network][txHash], log)
+}
+
+// SetSyncState sets the sync state for a network
+func (m *MockRepository) SetSyncState(state *NetworkSyncState) {
+	m.syncStates[state.Network] = state
+}
+
+// SetNetworkStats sets the network stats
+func (m *MockRepository) SetNetworkStats(stats *NetworkStats) {
+	m.networkStats[stats.Network] = stats
+}
+
+// ============================================================================
+// REPOSITORY INTERFACE IMPLEMENTATION
+// ============================================================================
+
+func (m *MockRepository) InsertBlock(ctx context.Context, block *Block) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.AddBlock(block)
+	return nil
+}
+
+func (m *MockRepository) InsertBlocks(ctx context.Context, blocks []*Block) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	for _, block := range blocks {
+		m.AddBlock(block)
+	}
+	return nil
+}
+
+func (m *MockRepository) GetBlockByNumber(ctx context.Context, network string, number int64) (*Block, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if netBlocks, ok := m.blocks[network]; ok {
+		if block, ok := netBlocks[number]; ok {
+			return block, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) GetBlockByHash(ctx context.Context, network, hash string) (*Block, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if netBlocks, ok := m.blocksByHash[network]; ok {
+		if block, ok := netBlocks[hash]; ok {
+			return block, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) ListBlocks(ctx context.Context, filter BlockFilter) (*ListResult[Block], error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var items []Block
+	if netBlocks, ok := m.blocks[filter.Network]; ok {
+		for _, block := range netBlocks {
+			items = append(items, *block)
+		}
+	}
+	return &ListResult[Block]{
+		Items:      items,
+		Total:      int64(len(items)),
+		Page:       filter.Page,
+		PageSize:   filter.PageSize,
+		TotalPages: 1,
+	}, nil
+}
+
+func (m *MockRepository) GetLatestBlock(ctx context.Context, network string) (*Block, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var latest *Block
+	if netBlocks, ok := m.blocks[network]; ok {
+		for _, block := range netBlocks {
+			if latest == nil || block.BlockNumber > latest.BlockNumber {
+				latest = block
+			}
+		}
+	}
+	return latest, nil
+}
+
+func (m *MockRepository) InsertTransaction(ctx context.Context, tx *Transaction) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.AddTransaction(tx)
+	return nil
+}
+
+func (m *MockRepository) InsertTransactions(ctx context.Context, txs []*Transaction) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	for _, tx := range txs {
+		m.AddTransaction(tx)
+	}
+	return nil
+}
+
+func (m *MockRepository) GetTransactionByHash(ctx context.Context, network, hash string) (*Transaction, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if netTxs, ok := m.transactions[network]; ok {
+		if tx, ok := netTxs[hash]; ok {
+			return tx, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) ListTransactions(ctx context.Context, filter TransactionFilter) (*ListResult[Transaction], error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var items []Transaction
+	if netTxs, ok := m.transactions[filter.Network]; ok {
+		for _, tx := range netTxs {
+			items = append(items, *tx)
+		}
+	}
+	return &ListResult[Transaction]{
+		Items:      items,
+		Total:      int64(len(items)),
+		Page:       filter.Page,
+		PageSize:   filter.PageSize,
+		TotalPages: 1,
+	}, nil
+}
+
+func (m *MockRepository) GetTransactionsByBlock(ctx context.Context, network string, blockNumber int64) ([]Transaction, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if netTxs, ok := m.txsByBlock[network]; ok {
+		if txs, ok := netTxs[blockNumber]; ok {
+			return txs, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) UpsertAddress(ctx context.Context, addr *Address) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.AddAddress(addr)
+	return nil
+}
+
+func (m *MockRepository) GetAddress(ctx context.Context, network, address string) (*Address, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if netAddrs, ok := m.addresses[network]; ok {
+		if addr, ok := netAddrs[address]; ok {
+			return addr, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) GetAddressTransactions(ctx context.Context, network, address string, opts PaginationOptions) (*ListResult[Transaction], error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var items []Transaction
+	if netTxs, ok := m.transactions[network]; ok {
+		for _, tx := range netTxs {
+			if tx.From == address || (tx.To != nil && *tx.To == address) {
+				items = append(items, *tx)
+			}
+		}
+	}
+	return &ListResult[Transaction]{
+		Items:      items,
+		Total:      int64(len(items)),
+		Page:       opts.Page,
+		PageSize:   opts.PageSize,
+		TotalPages: 1,
+	}, nil
+}
+
+func (m *MockRepository) IncrementAddressTxCount(ctx context.Context, network string, addresses []string, timestamp time.Time) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	return nil
+}
+
+func (m *MockRepository) InsertEventLog(ctx context.Context, log *EventLog) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.AddEventLog(log.Network, log.TxHash, *log)
+	return nil
+}
+
+func (m *MockRepository) InsertEventLogs(ctx context.Context, logs []*EventLog) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	for _, log := range logs {
+		m.AddEventLog(log.Network, log.TxHash, *log)
+	}
+	return nil
+}
+
+func (m *MockRepository) GetTransactionLogs(ctx context.Context, network, txHash string) ([]EventLog, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if netLogs, ok := m.eventLogs[network]; ok {
+		if logs, ok := netLogs[txHash]; ok {
+			return logs, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) GetAddressLogs(ctx context.Context, network, address string, opts PaginationOptions) (*ListResult[EventLog], error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var items []EventLog
+	if netLogs, ok := m.eventLogs[network]; ok {
+		for _, logs := range netLogs {
+			for _, log := range logs {
+				if log.ContractAddress == address {
+					items = append(items, log)
+				}
+			}
+		}
+	}
+	return &ListResult[EventLog]{
+		Items:      items,
+		Total:      int64(len(items)),
+		Page:       opts.Page,
+		PageSize:   opts.PageSize,
+		TotalPages: 1,
+	}, nil
+}
+
+func (m *MockRepository) GetSyncState(ctx context.Context, network string) (*NetworkSyncState, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	return m.syncStates[network], nil
+}
+
+func (m *MockRepository) UpdateSyncState(ctx context.Context, network string, lastBlock int64, isSyncing bool, blocksBehind int64, errMsg *string) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.syncStates[network] = &NetworkSyncState{
+		Network:          network,
+		LastIndexedBlock: lastBlock,
+		IsSyncing:        isSyncing,
+		BlocksBehind:     blocksBehind,
+		ErrorMessage:     errMsg,
+	}
+	return nil
+}
+
+func (m *MockRepository) GetNetworkStats(ctx context.Context, network string) (*NetworkStats, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	return m.networkStats[network], nil
+}
+
+// Compile-time check that MockRepository implements RepositoryInterface
+var _ RepositoryInterface = (*MockRepository)(nil)
 
 func TestNewPaginationOptions(t *testing.T) {
 	tests := []struct {
@@ -865,5 +1236,610 @@ func BenchmarkSupportedNetworks(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		SupportedNetworks()
+	}
+}
+
+// ============================================================================
+// EXPLORER TESTS WITH MOCK REPOSITORY
+// ============================================================================
+
+func TestExplorerWithMock_GetBlock(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	// Add test block
+	block := &Block{
+		Network:     "ethereum",
+		BlockNumber: 12345678,
+		BlockHash:   "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+		Timestamp:   time.Now(),
+	}
+	mock.AddBlock(block)
+
+	// Test GetBlock by number
+	result, err := explorer.GetBlock(ctx, "ethereum", "12345678")
+	if err != nil {
+		t.Fatalf("GetBlock failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected block, got nil")
+	}
+	if result.BlockNumber != 12345678 {
+		t.Errorf("BlockNumber = %d, want 12345678", result.BlockNumber)
+	}
+
+	// Test GetBlock by hash
+	result, err = explorer.GetBlock(ctx, "ethereum", "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	if err != nil {
+		t.Fatalf("GetBlock by hash failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected block, got nil")
+	}
+
+	// Test GetBlock not found
+	result, err = explorer.GetBlock(ctx, "ethereum", "99999999")
+	if err != nil {
+		t.Fatalf("GetBlock failed: %v", err)
+	}
+	if result != nil {
+		t.Error("Expected nil for non-existent block")
+	}
+}
+
+func TestExplorerWithMock_GetBlockByNumber(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	block := &Block{
+		Network:     "ethereum",
+		BlockNumber: 100,
+		BlockHash:   "0xabc",
+	}
+	mock.AddBlock(block)
+
+	result, err := explorer.GetBlockByNumber(ctx, "ethereum", 100)
+	if err != nil {
+		t.Fatalf("GetBlockByNumber failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected block, got nil")
+	}
+	if result.BlockNumber != 100 {
+		t.Errorf("BlockNumber = %d, want 100", result.BlockNumber)
+	}
+}
+
+func TestExplorerWithMock_GetBlockByHash(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	block := &Block{
+		Network:     "ethereum",
+		BlockNumber: 100,
+		BlockHash:   "0xabc123",
+	}
+	mock.AddBlock(block)
+
+	result, err := explorer.GetBlockByHash(ctx, "ethereum", "0xabc123")
+	if err != nil {
+		t.Fatalf("GetBlockByHash failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected block, got nil")
+	}
+	if result.BlockHash != "0xabc123" {
+		t.Errorf("BlockHash = %s, want 0xabc123", result.BlockHash)
+	}
+}
+
+func TestExplorerWithMock_GetLatestBlock(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	// Add multiple blocks
+	mock.AddBlock(&Block{Network: "ethereum", BlockNumber: 100, BlockHash: "0xa"})
+	mock.AddBlock(&Block{Network: "ethereum", BlockNumber: 200, BlockHash: "0xb"})
+	mock.AddBlock(&Block{Network: "ethereum", BlockNumber: 150, BlockHash: "0xc"})
+
+	result, err := explorer.GetLatestBlock(ctx, "ethereum")
+	if err != nil {
+		t.Fatalf("GetLatestBlock failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected block, got nil")
+	}
+	if result.BlockNumber != 200 {
+		t.Errorf("Latest block number = %d, want 200", result.BlockNumber)
+	}
+}
+
+func TestExplorerWithMock_ListBlocks(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	mock.AddBlock(&Block{Network: "ethereum", BlockNumber: 100})
+	mock.AddBlock(&Block{Network: "ethereum", BlockNumber: 101})
+	mock.AddBlock(&Block{Network: "ethereum", BlockNumber: 102})
+
+	result, err := explorer.ListBlocks(ctx, "ethereum", 1, 20, nil)
+	if err != nil {
+		t.Fatalf("ListBlocks failed: %v", err)
+	}
+	if result.Total != 3 {
+		t.Errorf("Total = %d, want 3", result.Total)
+	}
+	if len(result.Items) != 3 {
+		t.Errorf("Items count = %d, want 3", len(result.Items))
+	}
+}
+
+func TestExplorerWithMock_GetTransaction(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+	tx := &Transaction{
+		Network:     "ethereum",
+		TxHash:      txHash,
+		BlockNumber: 100,
+		From:        "0x1111111111111111111111111111111111111111",
+		Value:       "1000000000000000000",
+	}
+	mock.AddTransaction(tx)
+
+	result, err := explorer.GetTransaction(ctx, "ethereum", txHash)
+	if err != nil {
+		t.Fatalf("GetTransaction failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected transaction, got nil")
+	}
+	if result.TxHash != txHash {
+		t.Errorf("TxHash = %s, want %s", result.TxHash, txHash)
+	}
+	if result.Value != "1000000000000000000" {
+		t.Errorf("Value = %s, want 1000000000000000000", result.Value)
+	}
+}
+
+func TestExplorerWithMock_ListTransactions(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x1", BlockNumber: 100})
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x2", BlockNumber: 101})
+
+	filter := TransactionFilter{
+		Network:           "ethereum",
+		PaginationOptions: NewPaginationOptions(1, 20),
+	}
+
+	result, err := explorer.ListTransactions(ctx, filter)
+	if err != nil {
+		t.Fatalf("ListTransactions failed: %v", err)
+	}
+	if result.Total != 2 {
+		t.Errorf("Total = %d, want 2", result.Total)
+	}
+}
+
+func TestExplorerWithMock_GetBlockTransactions(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x1", BlockNumber: 100, TxIndex: 0})
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x2", BlockNumber: 100, TxIndex: 1})
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x3", BlockNumber: 101, TxIndex: 0})
+
+	result, err := explorer.GetBlockTransactions(ctx, "ethereum", 100)
+	if err != nil {
+		t.Fatalf("GetBlockTransactions failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("Count = %d, want 2", len(result))
+	}
+}
+
+func TestExplorerWithMock_GetTransactionLogs(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	txHash := "0x1234"
+	topic := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+	mock.AddEventLog("ethereum", txHash, EventLog{
+		Network:         "ethereum",
+		TxHash:          txHash,
+		LogIndex:        0,
+		ContractAddress: "0xtoken",
+		Topic0:          &topic,
+	})
+	mock.AddEventLog("ethereum", txHash, EventLog{
+		Network:         "ethereum",
+		TxHash:          txHash,
+		LogIndex:        1,
+		ContractAddress: "0xtoken",
+	})
+
+	result, err := explorer.GetTransactionLogs(ctx, "ethereum", txHash)
+	if err != nil {
+		t.Fatalf("GetTransactionLogs failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("Count = %d, want 2", len(result))
+	}
+}
+
+func TestExplorerWithMock_GetAddress(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	address := "0x1234567890abcdef1234567890abcdef12345678"
+	addr := &Address{
+		Network:    "ethereum",
+		Address:    address,
+		Balance:    "5000000000000000000",
+		TxCount:    150,
+		IsContract: false,
+	}
+	mock.AddAddress(addr)
+
+	result, err := explorer.GetAddress(ctx, "ethereum", address)
+	if err != nil {
+		t.Fatalf("GetAddress failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected address, got nil")
+	}
+	if result.Balance != "5000000000000000000" {
+		t.Errorf("Balance = %s, want 5000000000000000000", result.Balance)
+	}
+	if result.TxCount != 150 {
+		t.Errorf("TxCount = %d, want 150", result.TxCount)
+	}
+}
+
+func TestExplorerWithMock_GetAddress_NotFound(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	// Address not in DB should return default
+	result, err := explorer.GetAddress(ctx, "ethereum", "0x9999999999999999999999999999999999999999")
+	if err != nil {
+		t.Fatalf("GetAddress failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected default address, got nil")
+	}
+	if result.Balance != "0" {
+		t.Errorf("Balance = %s, want 0", result.Balance)
+	}
+	if result.TxCount != 0 {
+		t.Errorf("TxCount = %d, want 0", result.TxCount)
+	}
+}
+
+func TestExplorerWithMock_GetAddressTransactions(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	address := "0x1111111111111111111111111111111111111111"
+	toAddr := "0x2222222222222222222222222222222222222222"
+
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x1", From: address, BlockNumber: 100})
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x2", From: "0xother", To: &address, BlockNumber: 101})
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x3", From: "0xother", To: &toAddr, BlockNumber: 102})
+
+	result, err := explorer.GetAddressTransactions(ctx, "ethereum", address, 1, 20)
+	if err != nil {
+		t.Fatalf("GetAddressTransactions failed: %v", err)
+	}
+	if result.Total != 2 {
+		t.Errorf("Total = %d, want 2", result.Total)
+	}
+}
+
+func TestExplorerWithMock_GetAddressLogs(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	contractAddr := "0xcontract"
+	mock.AddEventLog("ethereum", "0xtx1", EventLog{
+		Network:         "ethereum",
+		TxHash:          "0xtx1",
+		ContractAddress: contractAddr,
+	})
+	mock.AddEventLog("ethereum", "0xtx2", EventLog{
+		Network:         "ethereum",
+		TxHash:          "0xtx2",
+		ContractAddress: contractAddr,
+	})
+	mock.AddEventLog("ethereum", "0xtx3", EventLog{
+		Network:         "ethereum",
+		TxHash:          "0xtx3",
+		ContractAddress: "0xother",
+	})
+
+	result, err := explorer.GetAddressLogs(ctx, "ethereum", contractAddr, 1, 20)
+	if err != nil {
+		t.Fatalf("GetAddressLogs failed: %v", err)
+	}
+	if result.Total != 2 {
+		t.Errorf("Total = %d, want 2", result.Total)
+	}
+}
+
+func TestExplorerWithMock_Search(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	// Add test data
+	txHash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: txHash, BlockNumber: 100})
+	mock.AddBlock(&Block{Network: "ethereum", BlockNumber: 12345, BlockHash: "0xblock"})
+	mock.AddAddress(&Address{Network: "ethereum", Address: "0x1234567890abcdef1234567890abcdef12345678", Balance: "100"})
+
+	// Search for transaction
+	result, err := explorer.Search(ctx, "ethereum", txHash)
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if result.Total != 1 {
+		t.Errorf("Total = %d, want 1", result.Total)
+	}
+	if len(result.Results) > 0 && result.Results[0].Type != "transaction" {
+		t.Errorf("Type = %s, want transaction", result.Results[0].Type)
+	}
+
+	// Search for block number
+	result, err = explorer.Search(ctx, "ethereum", "12345")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if result.Total != 1 {
+		t.Errorf("Total = %d, want 1", result.Total)
+	}
+
+	// Search for address
+	result, err = explorer.Search(ctx, "ethereum", "0x1234567890abcdef1234567890abcdef12345678")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if result.Total != 1 {
+		t.Errorf("Total = %d, want 1", result.Total)
+	}
+
+	// Empty search
+	result, err = explorer.Search(ctx, "ethereum", "")
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+	if result.Total != 0 {
+		t.Errorf("Total = %d, want 0", result.Total)
+	}
+}
+
+func TestExplorerWithMock_GetNetworkStats(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	stats := &NetworkStats{
+		Network:           "ethereum",
+		LatestBlock:       18000000,
+		TotalTransactions: 2000000000,
+		TotalAddresses:    300000000,
+	}
+	mock.SetNetworkStats(stats)
+
+	result, err := explorer.GetNetworkStats(ctx, "ethereum")
+	if err != nil {
+		t.Fatalf("GetNetworkStats failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected stats, got nil")
+	}
+	if result.LatestBlock != 18000000 {
+		t.Errorf("LatestBlock = %d, want 18000000", result.LatestBlock)
+	}
+}
+
+func TestExplorerWithMock_GetSyncState(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	state := &NetworkSyncState{
+		Network:          "ethereum",
+		LastIndexedBlock: 18000000,
+		IsSyncing:        true,
+		BlocksBehind:     50,
+	}
+	mock.SetSyncState(state)
+
+	result, err := explorer.GetSyncState(ctx, "ethereum")
+	if err != nil {
+		t.Fatalf("GetSyncState failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Expected state, got nil")
+	}
+	if result.LastIndexedBlock != 18000000 {
+		t.Errorf("LastIndexedBlock = %d, want 18000000", result.LastIndexedBlock)
+	}
+	if !result.IsSyncing {
+		t.Error("IsSyncing should be true")
+	}
+}
+
+func TestExplorerWithMock_IndexBlock(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	block := &Block{
+		Network:     "ethereum",
+		BlockNumber: 100,
+		BlockHash:   "0xblock",
+		Timestamp:   time.Now(),
+	}
+	toAddr := "0x2222222222222222222222222222222222222222"
+	txs := []*Transaction{
+		{Network: "ethereum", TxHash: "0xtx1", BlockNumber: 100, From: "0x1111111111111111111111111111111111111111", To: &toAddr},
+	}
+	logs := []*EventLog{
+		{Network: "ethereum", TxHash: "0xtx1", ContractAddress: "0xcontract"},
+	}
+
+	err := explorer.IndexBlock(ctx, block, txs, logs)
+	if err != nil {
+		t.Fatalf("IndexBlock failed: %v", err)
+	}
+
+	// Verify block was indexed
+	result, _ := mock.GetBlockByNumber(ctx, "ethereum", 100)
+	if result == nil {
+		t.Error("Block should be indexed")
+	}
+
+	// Verify sync state was updated
+	state, _ := mock.GetSyncState(ctx, "ethereum")
+	if state == nil {
+		t.Error("Sync state should be updated")
+	}
+	if state.LastIndexedBlock != 100 {
+		t.Errorf("LastIndexedBlock = %d, want 100", state.LastIndexedBlock)
+	}
+}
+
+func TestExplorerWithMock_IndexBlocks(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	blocks := []*Block{
+		{Network: "ethereum", BlockNumber: 100, BlockHash: "0xa"},
+		{Network: "ethereum", BlockNumber: 101, BlockHash: "0xb"},
+		{Network: "ethereum", BlockNumber: 102, BlockHash: "0xc"},
+	}
+
+	err := explorer.IndexBlocks(ctx, blocks, nil, nil)
+	if err != nil {
+		t.Fatalf("IndexBlocks failed: %v", err)
+	}
+
+	// Verify all blocks were indexed
+	for _, block := range blocks {
+		result, _ := mock.GetBlockByNumber(ctx, "ethereum", block.BlockNumber)
+		if result == nil {
+			t.Errorf("Block %d should be indexed", block.BlockNumber)
+		}
+	}
+
+	// Verify sync state points to latest block
+	state, _ := mock.GetSyncState(ctx, "ethereum")
+	if state.LastIndexedBlock != 102 {
+		t.Errorf("LastIndexedBlock = %d, want 102", state.LastIndexedBlock)
+	}
+}
+
+func TestExplorerWithMock_ErrorHandling(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	testErr := errors.New("database error")
+	mock.SetError(testErr)
+
+	// Test GetBlock error
+	_, err := explorer.GetBlock(ctx, "ethereum", "100")
+	if err == nil {
+		t.Error("Expected error from GetBlock")
+	}
+
+	// Test GetTransaction error
+	_, err = explorer.GetTransaction(ctx, "ethereum", "0x123")
+	if err == nil {
+		t.Error("Expected error from GetTransaction")
+	}
+
+	// Test GetAddress error
+	_, err = explorer.GetAddress(ctx, "ethereum", "0x123")
+	if err == nil {
+		t.Error("Expected error from GetAddress")
+	}
+
+	// Test Search error
+	_, err = explorer.Search(ctx, "ethereum", "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	if err == nil {
+		t.Error("Expected error from Search")
+	}
+
+	// Test IndexBlock error
+	err = explorer.IndexBlock(ctx, &Block{Network: "ethereum", BlockNumber: 1}, nil, nil)
+	if err == nil {
+		t.Error("Expected error from IndexBlock")
+	}
+}
+
+func TestExplorerWithMock_IndexBlock_TransactionError(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	block := &Block{Network: "ethereum", BlockNumber: 100, BlockHash: "0xa", Timestamp: time.Now()}
+
+	// First InsertBlock succeeds
+	err := explorer.IndexBlock(ctx, block, nil, nil)
+	if err != nil {
+		t.Fatalf("IndexBlock failed: %v", err)
+	}
+
+	// Now set error for transaction insert
+	mock.SetError(errors.New("transaction error"))
+
+	toAddr := "0x2222222222222222222222222222222222222222"
+	txs := []*Transaction{
+		{Network: "ethereum", TxHash: "0xtx", From: "0x1111111111111111111111111111111111111111", To: &toAddr},
+	}
+
+	err = explorer.IndexBlock(ctx, &Block{Network: "ethereum", BlockNumber: 101, Timestamp: time.Now()}, txs, nil)
+	if err == nil {
+		t.Error("Expected error when inserting transactions")
+	}
+}
+
+func TestExplorerWithMock_ListTransactions_DefaultPageSize(t *testing.T) {
+	mock := NewMockRepository()
+	explorer := NewWithRepository(mock)
+	ctx := context.Background()
+
+	mock.AddTransaction(&Transaction{Network: "ethereum", TxHash: "0x1", BlockNumber: 100})
+
+	// Test with zero page size (should use default)
+	filter := TransactionFilter{
+		Network: "ethereum",
+	}
+
+	result, err := explorer.ListTransactions(ctx, filter)
+	if err != nil {
+		t.Fatalf("ListTransactions failed: %v", err)
+	}
+	if result.PageSize != 20 {
+		t.Errorf("PageSize = %d, want 20 (default)", result.PageSize)
 	}
 }

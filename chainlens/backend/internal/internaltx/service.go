@@ -12,7 +12,7 @@ import (
 
 // Service provides internal transaction business logic
 type Service struct {
-	repo       *Repository
+	repo       RepositoryInterface
 	tracer     *tracer.Tracer
 	rpcURLs    map[string]string
 	stopCh     chan struct{}
@@ -22,7 +22,7 @@ type Service struct {
 }
 
 // NewService creates a new internal transaction service
-func NewService(repo *Repository, tracer *tracer.Tracer) *Service {
+func NewService(repo RepositoryInterface, tracer *tracer.Tracer) *Service {
 	return &Service{
 		repo:       repo,
 		tracer:     tracer,

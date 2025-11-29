@@ -1,9 +1,321 @@
 package internaltx
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
+
+// ============================================================================
+// MOCK REPOSITORY
+// ============================================================================
+
+// MockRepository implements RepositoryInterface for testing
+type MockRepository struct {
+	internalTxs      map[string]map[string][]*InternalTransaction // network -> txHash -> []InternalTransaction
+	processingStatus map[string]map[string]*TraceProcessingStatus // network -> txHash -> status
+	createdContracts map[string][]*InternalTransaction           // network -> []InternalTransaction
+
+	// Error simulation
+	simulateError bool
+	errorToReturn error
+}
+
+// NewMockRepository creates a new mock repository
+func NewMockRepository() *MockRepository {
+	return &MockRepository{
+		internalTxs:      make(map[string]map[string][]*InternalTransaction),
+		processingStatus: make(map[string]map[string]*TraceProcessingStatus),
+		createdContracts: make(map[string][]*InternalTransaction),
+	}
+}
+
+// SetError enables error simulation
+func (m *MockRepository) SetError(err error) {
+	m.simulateError = true
+	m.errorToReturn = err
+}
+
+// ClearError disables error simulation
+func (m *MockRepository) ClearError() {
+	m.simulateError = false
+	m.errorToReturn = nil
+}
+
+// AddInternalTransaction adds an internal transaction to the mock
+func (m *MockRepository) AddInternalTransaction(tx *InternalTransaction) {
+	if m.internalTxs[tx.Network] == nil {
+		m.internalTxs[tx.Network] = make(map[string][]*InternalTransaction)
+	}
+	m.internalTxs[tx.Network][tx.TxHash] = append(m.internalTxs[tx.Network][tx.TxHash], tx)
+
+	// Track created contracts
+	if tx.CreatedContract != nil {
+		m.createdContracts[tx.Network] = append(m.createdContracts[tx.Network], tx)
+	}
+}
+
+// SetProcessingStatus sets the processing status for a transaction
+func (m *MockRepository) SetProcessingStatus(status *TraceProcessingStatus) {
+	if m.processingStatus[status.Network] == nil {
+		m.processingStatus[status.Network] = make(map[string]*TraceProcessingStatus)
+	}
+	m.processingStatus[status.Network][status.TxHash] = status
+}
+
+// ============================================================================
+// REPOSITORY INTERFACE IMPLEMENTATION
+// ============================================================================
+
+func (m *MockRepository) InsertInternalTransaction(ctx context.Context, tx *InternalTransaction) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	m.AddInternalTransaction(tx)
+	return nil
+}
+
+func (m *MockRepository) InsertInternalTransactionsBatch(ctx context.Context, txs []*InternalTransaction) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	for _, tx := range txs {
+		m.AddInternalTransaction(tx)
+	}
+	return nil
+}
+
+func (m *MockRepository) GetByTxHash(ctx context.Context, network, txHash string) ([]*InternalTransaction, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if netTxs, ok := m.internalTxs[network]; ok {
+		if txs, ok := netTxs[txHash]; ok {
+			return txs, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) GetByAddress(ctx context.Context, filter *InternalTxFilter) ([]*InternalTransaction, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var result []*InternalTransaction
+	if netTxs, ok := m.internalTxs[filter.Network]; ok {
+		for _, txs := range netTxs {
+			for _, tx := range txs {
+				// Check address filters
+				matchFrom := filter.FromAddress == "" || tx.FromAddress == filter.FromAddress
+				matchTo := filter.ToAddress == "" || (tx.ToAddress != nil && *tx.ToAddress == filter.ToAddress)
+
+				// If both addresses are set and equal, match either from or to
+				if filter.FromAddress != "" && filter.ToAddress != "" && filter.FromAddress == filter.ToAddress {
+					if tx.FromAddress == filter.FromAddress || (tx.ToAddress != nil && *tx.ToAddress == filter.ToAddress) {
+						result = append(result, tx)
+					}
+				} else if matchFrom || matchTo {
+					result = append(result, tx)
+				}
+			}
+		}
+	}
+
+	// Apply pagination
+	pageSize := filter.PageSize
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 20
+	}
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	offset := (page - 1) * pageSize
+
+	if offset >= len(result) {
+		return nil, nil
+	}
+	end := offset + pageSize
+	if end > len(result) {
+		end = len(result)
+	}
+
+	return result[offset:end], nil
+}
+
+func (m *MockRepository) GetCreatedContracts(ctx context.Context, network string, limit, offset int) ([]*InternalTransaction, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	contracts := m.createdContracts[network]
+	if offset >= len(contracts) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(contracts) {
+		end = len(contracts)
+	}
+	return contracts[offset:end], nil
+}
+
+func (m *MockRepository) GetCallStats(ctx context.Context, network, txHash string) (*CallStats, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+
+	if netTxs, ok := m.internalTxs[network]; ok {
+		if txs, ok := netTxs[txHash]; ok {
+			stats := &CallStats{
+				TotalCalls:      len(txs),
+				CallsByType:     make(map[string]int),
+				TotalValueMoved: "0",
+			}
+
+			addressSet := make(map[string]bool)
+			for _, tx := range txs {
+				if tx.Depth > stats.MaxDepth {
+					stats.MaxDepth = tx.Depth
+				}
+				stats.CallsByType[tx.TraceType]++
+				addressSet[tx.FromAddress] = true
+				if tx.ToAddress != nil {
+					addressSet[*tx.ToAddress] = true
+				}
+				if tx.CreatedContract != nil {
+					stats.ContractsCreated++
+				}
+				if tx.Reverted || tx.Error != nil {
+					stats.FailedCalls++
+				}
+				if tx.GasUsed != nil {
+					stats.TotalGasUsed += *tx.GasUsed
+				}
+			}
+			stats.UniqueAddresses = len(addressSet)
+			return stats, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) DeleteByTxHash(ctx context.Context, network, txHash string) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	if netTxs, ok := m.internalTxs[network]; ok {
+		delete(netTxs, txHash)
+	}
+	return nil
+}
+
+func (m *MockRepository) GetOrCreateProcessingStatus(ctx context.Context, network, txHash string, blockNumber int64) (*TraceProcessingStatus, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if m.processingStatus[network] == nil {
+		m.processingStatus[network] = make(map[string]*TraceProcessingStatus)
+	}
+	if status, ok := m.processingStatus[network][txHash]; ok {
+		return status, nil
+	}
+	status := &TraceProcessingStatus{
+		Network:     network,
+		TxHash:      txHash,
+		BlockNumber: blockNumber,
+		Status:      StatusPending,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	m.processingStatus[network][txHash] = status
+	return status, nil
+}
+
+func (m *MockRepository) UpdateProcessingStatus(ctx context.Context, network, txHash, status string, errorMsg *string) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	if m.processingStatus[network] != nil {
+		if s, ok := m.processingStatus[network][txHash]; ok {
+			s.Status = status
+			s.ErrorMessage = errorMsg
+			now := time.Now().UTC()
+			s.LastAttemptAt = &now
+			s.UpdatedAt = now
+			if status == StatusFailed {
+				s.RetryCount++
+			}
+		}
+	}
+	return nil
+}
+
+func (m *MockRepository) GetPendingTraces(ctx context.Context, network string, limit int, maxRetries int) ([]*PendingTraceJob, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	var jobs []*PendingTraceJob
+	if netStatus, ok := m.processingStatus[network]; ok {
+		for txHash, status := range netStatus {
+			if (status.Status == StatusPending || status.Status == StatusFailed) && status.RetryCount < maxRetries {
+				jobs = append(jobs, &PendingTraceJob{
+					Network:     network,
+					TxHash:      txHash,
+					BlockNumber: status.BlockNumber,
+					RetryCount:  status.RetryCount,
+				})
+				if len(jobs) >= limit {
+					break
+				}
+			}
+		}
+	}
+	return jobs, nil
+}
+
+func (m *MockRepository) MarkAsProcessing(ctx context.Context, network string, txHashes []string) error {
+	if m.simulateError {
+		return m.errorToReturn
+	}
+	for _, txHash := range txHashes {
+		if m.processingStatus[network] != nil {
+			if status, ok := m.processingStatus[network][txHash]; ok {
+				status.Status = StatusProcessing
+				now := time.Now().UTC()
+				status.LastAttemptAt = &now
+			}
+		}
+	}
+	return nil
+}
+
+func (m *MockRepository) GetProcessingStatus(ctx context.Context, network, txHash string) (*TraceProcessingStatus, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	if netStatus, ok := m.processingStatus[network]; ok {
+		if status, ok := netStatus[txHash]; ok {
+			return status, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *MockRepository) CountByStatus(ctx context.Context, network string) (map[string]int64, error) {
+	if m.simulateError {
+		return nil, m.errorToReturn
+	}
+	counts := make(map[string]int64)
+	if netStatus, ok := m.processingStatus[network]; ok {
+		for _, status := range netStatus {
+			counts[status.Status]++
+		}
+	}
+	return counts, nil
+}
+
+// Compile-time check that MockRepository implements RepositoryInterface
+var _ RepositoryInterface = (*MockRepository)(nil)
 
 func TestTraceTypeConstants(t *testing.T) {
 	tests := []struct {
@@ -826,5 +1138,527 @@ func TestBuildTraceTreeMultipleRoots(t *testing.T) {
 	// Should return the last root in iteration (implementation dependent)
 	if tree == nil {
 		t.Fatal("Expected non-nil tree even with multiple roots")
+	}
+}
+
+// ============================================================================
+// SERVICE TESTS WITH MOCK REPOSITORY
+// ============================================================================
+
+func TestServiceWithMock_GetInternalTransactions(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	txHash := "0xabc123"
+	toAddr := "0x2222222222222222222222222222222222222222"
+
+	// Add internal transactions
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      txHash,
+		TraceIndex:  0,
+		BlockNumber: 18000000,
+		TraceType:   TraceTypeCall,
+		FromAddress: "0x1111111111111111111111111111111111111111",
+		ToAddress:   &toAddr,
+		Depth:       0,
+	})
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      txHash,
+		TraceIndex:  1,
+		BlockNumber: 18000000,
+		TraceType:   TraceTypeStaticCall,
+		FromAddress: toAddr,
+		ToAddress:   &toAddr,
+		Depth:       1,
+	})
+
+	result, err := service.GetInternalTransactions(ctx, "ethereum", txHash)
+	if err != nil {
+		t.Fatalf("GetInternalTransactions failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("Expected 2 transactions, got %d", len(result))
+	}
+	if result[0].TraceType != TraceTypeCall {
+		t.Errorf("Expected CALL, got %s", result[0].TraceType)
+	}
+}
+
+func TestServiceWithMock_GetInternalTransactionTree(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	txHash := "0xabc123"
+	toAddr := "0x2222222222222222222222222222222222222222"
+	parentIdx := 0
+
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:          "ethereum",
+		TxHash:           txHash,
+		TraceIndex:       0,
+		ParentTraceIndex: nil,
+		Depth:            0,
+		TraceType:        TraceTypeCall,
+		FromAddress:      "0x1111111111111111111111111111111111111111",
+		ToAddress:        &toAddr,
+	})
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:          "ethereum",
+		TxHash:           txHash,
+		TraceIndex:       1,
+		ParentTraceIndex: &parentIdx,
+		Depth:            1,
+		TraceType:        TraceTypeStaticCall,
+		FromAddress:      toAddr,
+		ToAddress:        &toAddr,
+	})
+
+	tree, err := service.GetInternalTransactionTree(ctx, "ethereum", txHash)
+	if err != nil {
+		t.Fatalf("GetInternalTransactionTree failed: %v", err)
+	}
+	if tree == nil {
+		t.Fatal("Expected non-nil tree")
+	}
+	if tree.Call.TraceIndex != 0 {
+		t.Errorf("Expected root trace index 0, got %d", tree.Call.TraceIndex)
+	}
+	if len(tree.Children) != 1 {
+		t.Errorf("Expected 1 child, got %d", len(tree.Children))
+	}
+}
+
+func TestServiceWithMock_GetInternalTransactionTree_Empty(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	tree, err := service.GetInternalTransactionTree(ctx, "ethereum", "0xnonexistent")
+	if err != nil {
+		t.Fatalf("GetInternalTransactionTree failed: %v", err)
+	}
+	if tree != nil {
+		t.Error("Expected nil tree for non-existent transaction")
+	}
+}
+
+func TestServiceWithMock_GetAddressInternalTransactions(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	address := "0x1111111111111111111111111111111111111111"
+	toAddr := "0x2222222222222222222222222222222222222222"
+
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      "0xtx1",
+		TraceIndex:  0,
+		TraceType:   TraceTypeCall,
+		FromAddress: address,
+		ToAddress:   &toAddr,
+	})
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      "0xtx2",
+		TraceIndex:  0,
+		TraceType:   TraceTypeCall,
+		FromAddress: "0xother",
+		ToAddress:   &address,
+	})
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      "0xtx3",
+		TraceIndex:  0,
+		TraceType:   TraceTypeCall,
+		FromAddress: "0xother",
+		ToAddress:   &toAddr,
+	})
+
+	result, err := service.GetAddressInternalTransactions(ctx, "ethereum", address, 1, 20)
+	if err != nil {
+		t.Fatalf("GetAddressInternalTransactions failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("Expected 2 transactions, got %d", len(result))
+	}
+}
+
+func TestServiceWithMock_GetCallStats(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	txHash := "0xabc123"
+	toAddr := "0x2222222222222222222222222222222222222222"
+	gas := int64(21000)
+	created := "0xnewcontract"
+	errMsg := "revert"
+
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      txHash,
+		TraceIndex:  0,
+		TraceType:   TraceTypeCall,
+		FromAddress: "0x1111111111111111111111111111111111111111",
+		ToAddress:   &toAddr,
+		Depth:       0,
+		GasUsed:     &gas,
+	})
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      txHash,
+		TraceIndex:  1,
+		TraceType:   TraceTypeCreate,
+		FromAddress: toAddr,
+		Depth:       1,
+		GasUsed:     &gas,
+		CreatedContract: &created,
+	})
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      txHash,
+		TraceIndex:  2,
+		TraceType:   TraceTypeCall,
+		FromAddress: toAddr,
+		ToAddress:   &toAddr,
+		Depth:       1,
+		GasUsed:     &gas,
+		Error:       &errMsg,
+		Reverted:    true,
+	})
+
+	stats, err := service.GetCallStats(ctx, "ethereum", txHash)
+	if err != nil {
+		t.Fatalf("GetCallStats failed: %v", err)
+	}
+	if stats == nil {
+		t.Fatal("Expected non-nil stats")
+	}
+	if stats.TotalCalls != 3 {
+		t.Errorf("Expected 3 total calls, got %d", stats.TotalCalls)
+	}
+	if stats.MaxDepth != 1 {
+		t.Errorf("Expected max depth 1, got %d", stats.MaxDepth)
+	}
+	if stats.ContractsCreated != 1 {
+		t.Errorf("Expected 1 contract created, got %d", stats.ContractsCreated)
+	}
+	if stats.FailedCalls != 1 {
+		t.Errorf("Expected 1 failed call, got %d", stats.FailedCalls)
+	}
+	if stats.TotalGasUsed != 63000 {
+		t.Errorf("Expected total gas used 63000, got %d", stats.TotalGasUsed)
+	}
+}
+
+func TestServiceWithMock_GetCreatedContracts(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	created1 := "0xcontract1"
+	created2 := "0xcontract2"
+
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:         "ethereum",
+		TxHash:          "0xtx1",
+		TraceIndex:      0,
+		TraceType:       TraceTypeCreate,
+		FromAddress:     "0x1111111111111111111111111111111111111111",
+		CreatedContract: &created1,
+	})
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:         "ethereum",
+		TxHash:          "0xtx2",
+		TraceIndex:      0,
+		TraceType:       TraceTypeCreate2,
+		FromAddress:     "0x1111111111111111111111111111111111111111",
+		CreatedContract: &created2,
+	})
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      "0xtx3",
+		TraceIndex:  0,
+		TraceType:   TraceTypeCall,
+		FromAddress: "0x1111111111111111111111111111111111111111",
+	})
+
+	result, err := service.GetCreatedContracts(ctx, "ethereum", 10, 0)
+	if err != nil {
+		t.Fatalf("GetCreatedContracts failed: %v", err)
+	}
+	if len(result) != 2 {
+		t.Errorf("Expected 2 created contracts, got %d", len(result))
+	}
+}
+
+func TestServiceWithMock_QueueForTracing(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	err := service.QueueForTracing(ctx, "ethereum", "0xabc123", 18000000)
+	if err != nil {
+		t.Fatalf("QueueForTracing failed: %v", err)
+	}
+
+	status, err := service.GetProcessingStatus(ctx, "ethereum", "0xabc123")
+	if err != nil {
+		t.Fatalf("GetProcessingStatus failed: %v", err)
+	}
+	if status == nil {
+		t.Fatal("Expected non-nil status")
+	}
+	if status.Status != StatusPending {
+		t.Errorf("Expected status 'pending', got %s", status.Status)
+	}
+}
+
+func TestServiceWithMock_GetProcessingStats(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	mock.SetProcessingStatus(&TraceProcessingStatus{Network: "ethereum", TxHash: "0x1", Status: StatusPending})
+	mock.SetProcessingStatus(&TraceProcessingStatus{Network: "ethereum", TxHash: "0x2", Status: StatusPending})
+	mock.SetProcessingStatus(&TraceProcessingStatus{Network: "ethereum", TxHash: "0x3", Status: StatusCompleted})
+	mock.SetProcessingStatus(&TraceProcessingStatus{Network: "ethereum", TxHash: "0x4", Status: StatusFailed})
+
+	stats, err := service.GetProcessingStats(ctx, "ethereum")
+	if err != nil {
+		t.Fatalf("GetProcessingStats failed: %v", err)
+	}
+	if stats[StatusPending] != 2 {
+		t.Errorf("Expected 2 pending, got %d", stats[StatusPending])
+	}
+	if stats[StatusCompleted] != 1 {
+		t.Errorf("Expected 1 completed, got %d", stats[StatusCompleted])
+	}
+	if stats[StatusFailed] != 1 {
+		t.Errorf("Expected 1 failed, got %d", stats[StatusFailed])
+	}
+}
+
+func TestServiceWithMock_ErrorHandling(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	testErr := errors.New("database error")
+	mock.SetError(testErr)
+
+	// Test GetInternalTransactions error
+	_, err := service.GetInternalTransactions(ctx, "ethereum", "0x123")
+	if err == nil {
+		t.Error("Expected error from GetInternalTransactions")
+	}
+
+	// Test GetInternalTransactionTree error
+	_, err = service.GetInternalTransactionTree(ctx, "ethereum", "0x123")
+	if err == nil {
+		t.Error("Expected error from GetInternalTransactionTree")
+	}
+
+	// Test GetCallStats error
+	_, err = service.GetCallStats(ctx, "ethereum", "0x123")
+	if err == nil {
+		t.Error("Expected error from GetCallStats")
+	}
+
+	// Test GetProcessingStatus error
+	_, err = service.GetProcessingStatus(ctx, "ethereum", "0x123")
+	if err == nil {
+		t.Error("Expected error from GetProcessingStatus")
+	}
+
+	// Test QueueForTracing error
+	err = service.QueueForTracing(ctx, "ethereum", "0x123", 100)
+	if err == nil {
+		t.Error("Expected error from QueueForTracing")
+	}
+}
+
+func TestServiceWithMock_TraceTransactionOnDemand_NoRPCURL(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	ctx := context.Background()
+
+	_, err := service.TraceTransactionOnDemand(ctx, "ethereum", "0x123")
+	if err == nil {
+		t.Error("Expected error when no RPC URL configured")
+	}
+}
+
+func TestServiceWithMock_TraceTransactionOnDemand_ExistingTrace(t *testing.T) {
+	mock := NewMockRepository()
+	service := NewService(mock, nil)
+	service.SetRPCURL("ethereum", "https://eth.example.com")
+	ctx := context.Background()
+
+	txHash := "0xabc123"
+	toAddr := "0x2222222222222222222222222222222222222222"
+
+	// Add existing trace data
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      txHash,
+		TraceIndex:  0,
+		TraceType:   TraceTypeCall,
+		FromAddress: "0x1111111111111111111111111111111111111111",
+		ToAddress:   &toAddr,
+	})
+
+	result, err := service.TraceTransactionOnDemand(ctx, "ethereum", txHash)
+	if err != nil {
+		t.Fatalf("TraceTransactionOnDemand failed: %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("Expected 1 transaction, got %d", len(result))
+	}
+}
+
+func TestMockRepository_InsertAndGetByAddress(t *testing.T) {
+	mock := NewMockRepository()
+	ctx := context.Background()
+
+	address := "0x1111111111111111111111111111111111111111"
+	toAddr := "0x2222222222222222222222222222222222222222"
+
+	// Insert transactions
+	err := mock.InsertInternalTransaction(ctx, &InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      "0xtx1",
+		TraceIndex:  0,
+		TraceType:   TraceTypeCall,
+		FromAddress: address,
+		ToAddress:   &toAddr,
+	})
+	if err != nil {
+		t.Fatalf("InsertInternalTransaction failed: %v", err)
+	}
+
+	// Get by address with same from and to
+	filter := &InternalTxFilter{
+		Network:     "ethereum",
+		FromAddress: address,
+		ToAddress:   address,
+		Page:        1,
+		PageSize:    20,
+	}
+	result, err := mock.GetByAddress(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetByAddress failed: %v", err)
+	}
+	if len(result) != 1 {
+		t.Errorf("Expected 1 transaction, got %d", len(result))
+	}
+}
+
+func TestMockRepository_ProcessingStatusWorkflow(t *testing.T) {
+	mock := NewMockRepository()
+	ctx := context.Background()
+
+	// Create status
+	status, err := mock.GetOrCreateProcessingStatus(ctx, "ethereum", "0xabc", 100)
+	if err != nil {
+		t.Fatalf("GetOrCreateProcessingStatus failed: %v", err)
+	}
+	if status.Status != StatusPending {
+		t.Errorf("Expected pending status, got %s", status.Status)
+	}
+
+	// Get pending traces
+	jobs, err := mock.GetPendingTraces(ctx, "ethereum", 10, 3)
+	if err != nil {
+		t.Fatalf("GetPendingTraces failed: %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Errorf("Expected 1 job, got %d", len(jobs))
+	}
+
+	// Mark as processing
+	err = mock.MarkAsProcessing(ctx, "ethereum", []string{"0xabc"})
+	if err != nil {
+		t.Fatalf("MarkAsProcessing failed: %v", err)
+	}
+
+	status, _ = mock.GetProcessingStatus(ctx, "ethereum", "0xabc")
+	if status.Status != StatusProcessing {
+		t.Errorf("Expected processing status, got %s", status.Status)
+	}
+
+	// Update to completed
+	err = mock.UpdateProcessingStatus(ctx, "ethereum", "0xabc", StatusCompleted, nil)
+	if err != nil {
+		t.Fatalf("UpdateProcessingStatus failed: %v", err)
+	}
+
+	status, _ = mock.GetProcessingStatus(ctx, "ethereum", "0xabc")
+	if status.Status != StatusCompleted {
+		t.Errorf("Expected completed status, got %s", status.Status)
+	}
+}
+
+func TestMockRepository_DeleteByTxHash(t *testing.T) {
+	mock := NewMockRepository()
+	ctx := context.Background()
+
+	txHash := "0xabc123"
+	toAddr := "0x2222222222222222222222222222222222222222"
+
+	mock.AddInternalTransaction(&InternalTransaction{
+		Network:     "ethereum",
+		TxHash:      txHash,
+		TraceIndex:  0,
+		TraceType:   TraceTypeCall,
+		FromAddress: "0x1111111111111111111111111111111111111111",
+		ToAddress:   &toAddr,
+	})
+
+	// Verify it exists
+	txs, _ := mock.GetByTxHash(ctx, "ethereum", txHash)
+	if len(txs) != 1 {
+		t.Fatal("Expected transaction to exist before delete")
+	}
+
+	// Delete
+	err := mock.DeleteByTxHash(ctx, "ethereum", txHash)
+	if err != nil {
+		t.Fatalf("DeleteByTxHash failed: %v", err)
+	}
+
+	// Verify it's gone
+	txs, _ = mock.GetByTxHash(ctx, "ethereum", txHash)
+	if len(txs) != 0 {
+		t.Error("Expected transaction to be deleted")
+	}
+}
+
+func TestMockRepository_InsertBatch(t *testing.T) {
+	mock := NewMockRepository()
+	ctx := context.Background()
+
+	txHash := "0xabc123"
+	toAddr := "0x2222222222222222222222222222222222222222"
+
+	txs := []*InternalTransaction{
+		{Network: "ethereum", TxHash: txHash, TraceIndex: 0, TraceType: TraceTypeCall, FromAddress: "0x1", ToAddress: &toAddr},
+		{Network: "ethereum", TxHash: txHash, TraceIndex: 1, TraceType: TraceTypeStaticCall, FromAddress: "0x2", ToAddress: &toAddr},
+		{Network: "ethereum", TxHash: txHash, TraceIndex: 2, TraceType: TraceTypeDelegateCall, FromAddress: "0x3", ToAddress: &toAddr},
+	}
+
+	err := mock.InsertInternalTransactionsBatch(ctx, txs)
+	if err != nil {
+		t.Fatalf("InsertInternalTransactionsBatch failed: %v", err)
+	}
+
+	result, _ := mock.GetByTxHash(ctx, "ethereum", txHash)
+	if len(result) != 3 {
+		t.Errorf("Expected 3 transactions, got %d", len(result))
 	}
 }

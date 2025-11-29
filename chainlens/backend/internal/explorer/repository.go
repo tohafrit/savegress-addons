@@ -11,6 +11,46 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// RepositoryInterface defines the interface for explorer data operations
+type RepositoryInterface interface {
+	// Blocks
+	InsertBlock(ctx context.Context, block *Block) error
+	InsertBlocks(ctx context.Context, blocks []*Block) error
+	GetBlockByNumber(ctx context.Context, network string, number int64) (*Block, error)
+	GetBlockByHash(ctx context.Context, network, hash string) (*Block, error)
+	ListBlocks(ctx context.Context, filter BlockFilter) (*ListResult[Block], error)
+	GetLatestBlock(ctx context.Context, network string) (*Block, error)
+
+	// Transactions
+	InsertTransaction(ctx context.Context, tx *Transaction) error
+	InsertTransactions(ctx context.Context, txs []*Transaction) error
+	GetTransactionByHash(ctx context.Context, network, hash string) (*Transaction, error)
+	ListTransactions(ctx context.Context, filter TransactionFilter) (*ListResult[Transaction], error)
+	GetTransactionsByBlock(ctx context.Context, network string, blockNumber int64) ([]Transaction, error)
+
+	// Addresses
+	UpsertAddress(ctx context.Context, addr *Address) error
+	GetAddress(ctx context.Context, network, address string) (*Address, error)
+	GetAddressTransactions(ctx context.Context, network, address string, opts PaginationOptions) (*ListResult[Transaction], error)
+	IncrementAddressTxCount(ctx context.Context, network string, addresses []string, timestamp time.Time) error
+
+	// Event Logs
+	InsertEventLog(ctx context.Context, log *EventLog) error
+	InsertEventLogs(ctx context.Context, logs []*EventLog) error
+	GetTransactionLogs(ctx context.Context, network, txHash string) ([]EventLog, error)
+	GetAddressLogs(ctx context.Context, network, address string, opts PaginationOptions) (*ListResult[EventLog], error)
+
+	// Sync State
+	GetSyncState(ctx context.Context, network string) (*NetworkSyncState, error)
+	UpdateSyncState(ctx context.Context, network string, lastBlock int64, isSyncing bool, blocksBehind int64, errMsg *string) error
+
+	// Statistics
+	GetNetworkStats(ctx context.Context, network string) (*NetworkStats, error)
+}
+
+// Compile-time check that Repository implements RepositoryInterface
+var _ RepositoryInterface = (*Repository)(nil)
+
 // Repository handles database operations for explorer data
 type Repository struct {
 	pool *pgxpool.Pool

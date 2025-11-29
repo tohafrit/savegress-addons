@@ -12,7 +12,7 @@ import (
 
 // Explorer provides blockchain explorer functionality
 type Explorer struct {
-	repo *Repository
+	repo RepositoryInterface
 }
 
 // New creates a new Explorer instance
@@ -23,12 +23,12 @@ func New(pool *pgxpool.Pool) *Explorer {
 }
 
 // NewWithRepository creates an Explorer with a custom repository (for testing)
-func NewWithRepository(repo *Repository) *Explorer {
+func NewWithRepository(repo RepositoryInterface) *Explorer {
 	return &Explorer{repo: repo}
 }
 
-// Repository returns the underlying repository
-func (e *Explorer) Repository() *Repository {
+// Repository returns the underlying repository (for backwards compatibility)
+func (e *Explorer) Repository() RepositoryInterface {
 	return e.repo
 }
 
