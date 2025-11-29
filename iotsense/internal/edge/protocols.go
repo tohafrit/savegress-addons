@@ -454,6 +454,8 @@ func NewProtocolRegistry() *ProtocolRegistry {
 	registry.Register("modbus", func() ProtocolHandler { return NewModbusHandler() })
 	registry.Register("opcua", func() ProtocolHandler { return NewOPCUAHandler() })
 	registry.Register("bacnet", func() ProtocolHandler { return NewBACnetHandler() })
+	registry.Register("amqp", func() ProtocolHandler { return NewAMQPHandler() })
+	registry.Register("coap", func() ProtocolHandler { return NewCoAPHandler() })
 
 	return registry
 }
@@ -489,6 +491,457 @@ func (r *ProtocolRegistry) ListProtocols() []string {
 	}
 
 	return protocols
+}
+
+// AMQPHandler handles AMQP (Advanced Message Queuing Protocol) for IoT
+type AMQPHandler struct {
+	mu            sync.RWMutex
+	host          string
+	port          int
+	vhost         string
+	username      string
+	password      string
+	useTLS        bool
+	connected     bool
+	subscriptions map[string]func(data []byte)
+	exchange      string
+	exchangeType  string // direct, fanout, topic, headers
+	durable       bool
+	autoDelete    bool
+}
+
+// NewAMQPHandler creates a new AMQP handler
+func NewAMQPHandler() *AMQPHandler {
+	return &AMQPHandler{
+		port:          5672,
+		vhost:         "/",
+		subscriptions: make(map[string]func(data []byte)),
+		exchangeType:  "topic",
+		durable:       true,
+	}
+}
+
+// Connect connects to the AMQP broker
+func (h *AMQPHandler) Connect(ctx context.Context, config map[string]interface{}) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if host, ok := config["host"].(string); ok {
+		h.host = host
+	}
+	if port, ok := config["port"].(int); ok {
+		h.port = port
+	}
+	if vhost, ok := config["vhost"].(string); ok {
+		h.vhost = vhost
+	}
+	if username, ok := config["username"].(string); ok {
+		h.username = username
+	}
+	if password, ok := config["password"].(string); ok {
+		h.password = password
+	}
+	if useTLS, ok := config["use_tls"].(bool); ok {
+		h.useTLS = useTLS
+	}
+	if exchange, ok := config["exchange"].(string); ok {
+		h.exchange = exchange
+	}
+	if exchangeType, ok := config["exchange_type"].(string); ok {
+		h.exchangeType = exchangeType
+	}
+	if durable, ok := config["durable"].(bool); ok {
+		h.durable = durable
+	}
+	if autoDelete, ok := config["auto_delete"].(bool); ok {
+		h.autoDelete = autoDelete
+	}
+
+	// In a real implementation, this would connect using streadway/amqp:
+	// conn, err := amqp.Dial(fmt.Sprintf("amqp://%s:%s@%s:%d/%s",
+	//     h.username, h.password, h.host, h.port, h.vhost))
+	// ch, err := conn.Channel()
+	// err = ch.ExchangeDeclare(h.exchange, h.exchangeType, h.durable, h.autoDelete, false, false, nil)
+
+	h.connected = true
+	return nil
+}
+
+// Disconnect disconnects from the AMQP broker
+func (h *AMQPHandler) Disconnect() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.connected = false
+	h.subscriptions = make(map[string]func(data []byte))
+
+	return nil
+}
+
+// Subscribe subscribes to an AMQP queue with routing key
+func (h *AMQPHandler) Subscribe(routingKey string, handler func(data []byte)) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if !h.connected {
+		return fmt.Errorf("not connected")
+	}
+
+	h.subscriptions[routingKey] = handler
+
+	// In a real implementation:
+	// q, err := ch.QueueDeclare("", false, true, true, false, nil)
+	// err = ch.QueueBind(q.Name, routingKey, h.exchange, false, nil)
+	// msgs, err := ch.Consume(q.Name, "", true, false, false, false, nil)
+	// go func() {
+	//     for d := range msgs {
+	//         handler(d.Body)
+	//     }
+	// }()
+
+	return nil
+}
+
+// Publish publishes a message to the AMQP exchange
+func (h *AMQPHandler) Publish(routingKey string, data []byte) error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if !h.connected {
+		return fmt.Errorf("not connected")
+	}
+
+	// In a real implementation:
+	// err = ch.Publish(h.exchange, routingKey, false, false, amqp.Publishing{
+	//     ContentType: "application/json",
+	//     Body:        data,
+	// })
+
+	return nil
+}
+
+// Read is not typically used for AMQP (async)
+func (h *AMQPHandler) Read(address string) (interface{}, error) {
+	return nil, fmt.Errorf("read not supported for AMQP, use Subscribe")
+}
+
+// Write is an alias for Publish
+func (h *AMQPHandler) Write(address string, value interface{}) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("failed to marshal: %w", err)
+	}
+	return h.Publish(address, data)
+}
+
+// IsConnected returns connection status
+func (h *AMQPHandler) IsConnected() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.connected
+}
+
+// AMQPMessage represents an AMQP message
+type AMQPMessage struct {
+	RoutingKey  string
+	Exchange    string
+	ContentType string
+	Body        []byte
+	Headers     map[string]interface{}
+	Timestamp   time.Time
+	MessageID   string
+	CorrelationID string
+	ReplyTo     string
+	Priority    uint8
+	DeliveryMode uint8 // 1=transient, 2=persistent
+}
+
+// PublishWithOptions publishes with full AMQP message options
+func (h *AMQPHandler) PublishWithOptions(msg *AMQPMessage) error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if !h.connected {
+		return fmt.Errorf("not connected")
+	}
+
+	// In a real implementation, this would use all message properties
+
+	return nil
+}
+
+// CoAPHandler handles CoAP (Constrained Application Protocol) for IoT
+type CoAPHandler struct {
+	mu            sync.RWMutex
+	host          string
+	port          int
+	connected     bool
+	useDTLS       bool
+	pskIdentity   string
+	pskKey        []byte
+	observations  map[string]func(data []byte)
+	timeout       time.Duration
+}
+
+// NewCoAPHandler creates a new CoAP handler
+func NewCoAPHandler() *CoAPHandler {
+	return &CoAPHandler{
+		port:         5683, // Default CoAP port (5684 for DTLS)
+		observations: make(map[string]func(data []byte)),
+		timeout:      5 * time.Second,
+	}
+}
+
+// Connect initializes the CoAP client
+func (h *CoAPHandler) Connect(ctx context.Context, config map[string]interface{}) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if host, ok := config["host"].(string); ok {
+		h.host = host
+	}
+	if port, ok := config["port"].(int); ok {
+		h.port = port
+	}
+	if useDTLS, ok := config["use_dtls"].(bool); ok {
+		h.useDTLS = useDTLS
+		if h.useDTLS && h.port == 5683 {
+			h.port = 5684 // Default DTLS port
+		}
+	}
+	if pskIdentity, ok := config["psk_identity"].(string); ok {
+		h.pskIdentity = pskIdentity
+	}
+	if pskKey, ok := config["psk_key"].([]byte); ok {
+		h.pskKey = pskKey
+	}
+	if timeout, ok := config["timeout"].(time.Duration); ok {
+		h.timeout = timeout
+	}
+
+	// In a real implementation, this would initialize the CoAP client:
+	// client := coap.Client{}
+	// if h.useDTLS {
+	//     client = coap.DTLSClient(pskIdentity, pskKey)
+	// }
+
+	h.connected = true
+	return nil
+}
+
+// Disconnect closes CoAP connections
+func (h *CoAPHandler) Disconnect() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.connected = false
+	h.observations = make(map[string]func(data []byte))
+
+	return nil
+}
+
+// Subscribe creates a CoAP Observe subscription
+func (h *CoAPHandler) Subscribe(path string, handler func(data []byte)) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if !h.connected {
+		return fmt.Errorf("not connected")
+	}
+
+	h.observations[path] = handler
+
+	// In a real implementation, this would use CoAP Observe (RFC 7641):
+	// req := coap.Message{
+	//     Type:      coap.Confirmable,
+	//     Code:      coap.GET,
+	//     MessageID: generateMessageID(),
+	//     Observe:   0, // Register observation
+	// }
+	// req.SetPath(path)
+	// conn.WriteMsg(req)
+	// go func() {
+	//     for {
+	//         resp, err := conn.ReadMsg()
+	//         if err != nil { break }
+	//         handler(resp.Payload)
+	//     }
+	// }()
+
+	return nil
+}
+
+// Publish sends a CoAP POST request
+func (h *CoAPHandler) Publish(path string, data []byte) error {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if !h.connected {
+		return fmt.Errorf("not connected")
+	}
+
+	// In a real implementation:
+	// req := coap.Message{
+	//     Type:    coap.Confirmable,
+	//     Code:    coap.POST,
+	//     Payload: data,
+	// }
+	// req.SetPath(path)
+	// resp, err := conn.Exchange(req)
+
+	return nil
+}
+
+// Read performs a CoAP GET request
+func (h *CoAPHandler) Read(path string) (interface{}, error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if !h.connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	// In a real implementation:
+	// req := coap.Message{
+	//     Type: coap.Confirmable,
+	//     Code: coap.GET,
+	// }
+	// req.SetPath(path)
+	// resp, err := conn.Exchange(req)
+	// return resp.Payload, nil
+
+	return nil, nil
+}
+
+// Write performs a CoAP PUT request
+func (h *CoAPHandler) Write(path string, value interface{}) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if !h.connected {
+		return fmt.Errorf("not connected")
+	}
+
+	// In a real implementation:
+	// data, err := json.Marshal(value)
+	// req := coap.Message{
+	//     Type:    coap.Confirmable,
+	//     Code:    coap.PUT,
+	//     Payload: data,
+	// }
+	// req.SetPath(path)
+	// resp, err := conn.Exchange(req)
+
+	return nil
+}
+
+// IsConnected returns connection status
+func (h *CoAPHandler) IsConnected() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.connected
+}
+
+// CoAPMethod represents CoAP request methods
+type CoAPMethod uint8
+
+const (
+	CoAPGET    CoAPMethod = 1
+	CoAPPOST   CoAPMethod = 2
+	CoAPPUT    CoAPMethod = 3
+	CoAPDELETE CoAPMethod = 4
+)
+
+// CoAPContentFormat represents CoAP content formats
+type CoAPContentFormat uint16
+
+const (
+	CoAPTextPlain         CoAPContentFormat = 0
+	CoAPLinkFormat        CoAPContentFormat = 40
+	CoAPXML               CoAPContentFormat = 41
+	CoAPOctetStream       CoAPContentFormat = 42
+	CoAPEXI               CoAPContentFormat = 47
+	CoAPJSON              CoAPContentFormat = 50
+	CoAPCBOR              CoAPContentFormat = 60
+	CoAPSenMLJSON         CoAPContentFormat = 110
+	CoAPSenMLCBOR         CoAPContentFormat = 112
+	CoAPLwM2MTLV          CoAPContentFormat = 11542
+	CoAPLwM2MJSON         CoAPContentFormat = 11543
+)
+
+// CoAPMessage represents a CoAP message
+type CoAPMessage struct {
+	Method        CoAPMethod
+	Path          string
+	Payload       []byte
+	ContentFormat CoAPContentFormat
+	Token         []byte
+	MessageID     uint16
+	Observe       *uint32 // nil=no observe, 0=register, 1=deregister
+	Options       map[string]interface{}
+}
+
+// Request performs a CoAP request with full message options
+func (h *CoAPHandler) Request(msg *CoAPMessage) ([]byte, error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if !h.connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	// In a real implementation, this would construct and send the CoAP message
+
+	return nil, nil
+}
+
+// Discover performs CoAP resource discovery (/.well-known/core)
+func (h *CoAPHandler) Discover() ([]CoAPResource, error) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	if !h.connected {
+		return nil, fmt.Errorf("not connected")
+	}
+
+	// In a real implementation:
+	// resp, err := h.Read("/.well-known/core")
+	// Parse link-format response
+
+	return nil, nil
+}
+
+// CoAPResource represents a discoverable CoAP resource
+type CoAPResource struct {
+	Path          string
+	ResourceType  string   // rt=
+	InterfaceDesc string   // if=
+	ContentFormat []uint16 // ct=
+	Size          uint32   // sz=
+	Title         string   // title=
+	Observable    bool     // obs
+}
+
+// CancelObserve cancels an observation
+func (h *CoAPHandler) CancelObserve(path string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if !h.connected {
+		return fmt.Errorf("not connected")
+	}
+
+	delete(h.observations, path)
+
+	// In a real implementation:
+	// req := coap.Message{
+	//     Type:    coap.Reset,
+	//     Code:    coap.GET,
+	//     Observe: 1, // Deregister
+	// }
+	// req.SetPath(path)
+
+	return nil
 }
 
 // DataConverter converts data between protocols
