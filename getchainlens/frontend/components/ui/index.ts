@@ -20,3 +20,4 @@ export {
   SelectItem,
   SelectSeparator,
 } from './select';
+export { Logo } from './logo';

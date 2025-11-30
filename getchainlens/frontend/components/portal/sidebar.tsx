@@ -14,12 +14,13 @@ import {
   CreditCard,
   Settings,
   LogOut,
-  Shield,
   Menu,
   X,
+  BookOpen,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
+import { Logo } from '@/components/ui/logo';
 
 interface NavItem {
   name: string;
@@ -56,6 +57,12 @@ const navigation: NavGroup[] = [
       { name: 'Settings', href: '/settings', icon: Settings },
     ],
   },
+  {
+    title: 'Resources',
+    items: [
+      { name: 'Documentation', href: '/docs', icon: BookOpen },
+    ],
+  },
 ];
 
 export function Sidebar() {
@@ -77,11 +84,9 @@ export function Sidebar() {
     <>
       {/* Logo */}
       <div className="flex h-16 items-center gap-3 px-6 border-b border-gray-800">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-accent-cyan to-primary">
-          <Shield className="h-5 w-5 text-white" />
-        </div>
+        <Logo size={36} />
         <div>
-          <h1 className="text-lg font-bold text-white">GetChainLens</h1>
+          <h1 className="text-lg font-bold text-white">ChainLens</h1>
           <p className="text-xs text-gray-500">Security Platform</p>
         </div>
       </div>

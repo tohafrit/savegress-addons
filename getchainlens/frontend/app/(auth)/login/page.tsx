@@ -7,7 +7,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
-import { Button, Input, Label, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui';
+import { Button, Input, Label, Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, Logo } from '@/components/ui';
 import { useAuth } from '@/lib/auth-context';
 
 const loginSchema = z.object({
@@ -50,9 +50,12 @@ export default function LoginPage() {
   return (
     <Card className="w-full max-w-md" variant="glass">
       <CardHeader className="text-center">
+        <div className="flex justify-center mb-4">
+          <Logo size={64} />
+        </div>
         <CardTitle className="text-2xl">Welcome back</CardTitle>
         <CardDescription>
-          Sign in to your account to continue
+          Sign in to your ChainLens account
         </CardDescription>
       </CardHeader>
 

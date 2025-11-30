@@ -9,10 +9,9 @@ import {
   Lock,
   BarChart3,
   ArrowRight,
-  CheckCircle2,
-  Github,
-  Twitter,
+  Check,
 } from 'lucide-react';
+import { Logo } from '@/components/ui/logo';
 
 export default function LandingPage() {
   return (
@@ -22,9 +21,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-accent-cyan to-primary">
-                <Shield className="h-5 w-5 text-white" />
-              </div>
+              <Logo size={36} />
               <span className="text-xl font-bold text-white">GetChainLens</span>
             </div>
             <div className="hidden md:flex items-center gap-8">
@@ -34,7 +31,7 @@ export default function LandingPage() {
               <a href="#pricing" className="text-gray-400 hover:text-white transition-colors">
                 Pricing
               </a>
-              <a href="https://docs.getchainlens.com" className="text-gray-400 hover:text-white transition-colors">
+              <a href="/login" className="text-gray-400 hover:text-white transition-colors">
                 Docs
               </a>
             </div>
@@ -221,6 +218,115 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Pricing */}
+      <section id="pricing" className="py-20 bg-dark-bg-secondary">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl font-bold text-white">
+              Simple, Transparent Pricing
+            </h2>
+            <p className="mt-4 text-gray-400 max-w-2xl mx-auto">
+              Start free and scale as your needs grow. No hidden fees.
+            </p>
+          </div>
+
+          <div className="grid gap-8 lg:grid-cols-3 max-w-5xl mx-auto">
+            {/* Free */}
+            <div className="rounded-xl border border-gray-800 bg-dark-card p-8">
+              <h3 className="text-lg font-semibold text-white">Free</h3>
+              <p className="mt-2 text-gray-400 text-sm">For individual developers</p>
+              <div className="mt-6">
+                <span className="text-4xl font-bold text-white">$0</span>
+                <span className="text-gray-400">/month</span>
+              </div>
+              <ul className="mt-8 space-y-4">
+                {[
+                  '5 contracts per month',
+                  'Basic security analysis',
+                  'Gas estimates',
+                  'Community support',
+                ].map((feature) => (
+                  <li key={feature} className="flex items-start gap-3">
+                    <Check className="h-5 w-5 text-accent-cyan shrink-0" />
+                    <span className="text-gray-300 text-sm">{feature}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/register"
+                className="mt-8 block w-full rounded-lg border border-gray-600 py-3 text-center text-sm font-medium text-white hover:bg-dark-card-hover transition-all"
+              >
+                Get Started
+              </Link>
+            </div>
+
+            {/* Pro */}
+            <div className="rounded-xl border-2 border-accent-cyan bg-dark-card p-8 relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-accent-cyan text-dark-bg text-xs font-semibold rounded-full">
+                Popular
+              </div>
+              <h3 className="text-lg font-semibold text-white">Pro</h3>
+              <p className="mt-2 text-gray-400 text-sm">For professional teams</p>
+              <div className="mt-6">
+                <span className="text-4xl font-bold text-white">$49</span>
+                <span className="text-gray-400">/month</span>
+              </div>
+              <ul className="mt-8 space-y-4">
+                {[
+                  'Unlimited contracts',
+                  'Advanced security analysis',
+                  'Transaction tracing',
+                  'Real-time monitoring',
+                  '10 monitors included',
+                  'Priority support',
+                ].map((feature) => (
+                  <li key={feature} className="flex items-start gap-3">
+                    <Check className="h-5 w-5 text-accent-cyan shrink-0" />
+                    <span className="text-gray-300 text-sm">{feature}</span>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href="/register"
+                className="mt-8 block w-full rounded-lg bg-gradient-to-r from-accent-cyan to-primary py-3 text-center text-sm font-medium text-white hover:shadow-glow-cyan transition-all"
+              >
+                Start Free Trial
+              </Link>
+            </div>
+
+            {/* Enterprise */}
+            <div className="rounded-xl border border-gray-800 bg-dark-card p-8">
+              <h3 className="text-lg font-semibold text-white">Enterprise</h3>
+              <p className="mt-2 text-gray-400 text-sm">For large organizations</p>
+              <div className="mt-6">
+                <span className="text-4xl font-bold text-white">Custom</span>
+              </div>
+              <ul className="mt-8 space-y-4">
+                {[
+                  'Everything in Pro',
+                  'Unlimited monitors',
+                  'Custom integrations',
+                  'SLA guarantee',
+                  'Dedicated support',
+                  'On-premise option',
+                ].map((feature) => (
+                  <li key={feature} className="flex items-start gap-3">
+                    <Check className="h-5 w-5 text-accent-cyan shrink-0" />
+                    <span className="text-gray-300 text-sm">{feature}</span>
+                  </li>
+                ))}
+              </ul>
+              <a
+                href="mailto:contact@getchainlens.com"
+                className="mt-8 block w-full rounded-lg border border-gray-600 py-3 text-center text-sm font-medium text-white hover:bg-dark-card-hover transition-all"
+              >
+                Contact Sales
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* CTA */}
       <section className="py-20 bg-gradient-to-b from-dark-bg-secondary to-dark-bg">
         <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 text-center">
@@ -239,7 +345,7 @@ export default function LandingPage() {
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
             <a
-              href="mailto:sales@getchainlens.com"
+              href="mailto:contact@getchainlens.com"
               className="inline-flex items-center justify-center rounded-lg border border-gray-600 px-8 py-3 text-base font-medium text-white hover:bg-dark-card transition-all"
             >
               Contact Sales
@@ -253,33 +359,13 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-accent-cyan to-primary">
-                <Shield className="h-4 w-4 text-white" />
-              </div>
+              <Logo size={32} />
               <span className="text-lg font-bold text-white">GetChainLens</span>
             </div>
             <div className="flex items-center gap-6 text-sm text-gray-400">
               <a href="/privacy" className="hover:text-white">Privacy</a>
               <a href="/terms" className="hover:text-white">Terms</a>
-              <a href="https://docs.getchainlens.com" className="hover:text-white">Docs</a>
-            </div>
-            <div className="flex items-center gap-4">
-              <a
-                href="https://github.com/getchainlens"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-gray-400 hover:text-white"
-              >
-                <Github className="h-5 w-5" />
-              </a>
-              <a
-                href="https://twitter.com/getchainlens"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-gray-400 hover:text-white"
-              >
-                <Twitter className="h-5 w-5" />
-              </a>
+              <a href="/login" className="hover:text-white">Docs</a>
             </div>
           </div>
           <div className="mt-8 text-center text-sm text-gray-500">

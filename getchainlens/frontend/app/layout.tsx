@@ -18,6 +18,15 @@ export const metadata: Metadata = {
   description: 'Production-grade security analysis, gas optimization, and debugging for Solidity smart contracts. Detect vulnerabilities, estimate gas costs, and trace transactions.',
   keywords: ['solidity', 'smart contracts', 'security', 'ethereum', 'blockchain', 'audit', 'gas optimization'],
   authors: [{ name: 'GetChainLens' }],
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon-96x96.png', sizes: '96x96', type: 'image/png' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
+  manifest: '/site.webmanifest',
   openGraph: {
     title: 'GetChainLens - Smart Contract Security Platform',
     description: 'Production-grade security analysis for Solidity smart contracts',

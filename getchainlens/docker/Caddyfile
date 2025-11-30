@@ -1,8 +1,5 @@
 # Main domain
 getchainlens.com {
-    # Frontend (default)
-    reverse_proxy frontend:3000
-
     # API routes (Go backend)
     handle /api/* {
         reverse_proxy backend:3001
@@ -12,6 +9,51 @@ getchainlens.com {
     handle /health {
         reverse_proxy backend:3001
     }
+
+    # Static files from public folder
+    handle /robots.txt {
+        root * /srv/public
+        file_server
+    }
+    handle /sitemap.xml {
+        root * /srv/public
+        file_server
+    }
+    handle /logo.svg {
+        root * /srv/public
+        file_server
+    }
+    handle /favicon.ico {
+        root * /srv/public
+        file_server
+    }
+    handle /favicon.svg {
+        root * /srv/public
+        file_server
+    }
+    handle /favicon-96x96.png {
+        root * /srv/public
+        file_server
+    }
+    handle /apple-touch-icon.png {
+        root * /srv/public
+        file_server
+    }
+    handle /site.webmanifest {
+        root * /srv/public
+        file_server
+    }
+    handle /web-app-manifest-192x192.png {
+        root * /srv/public
+        file_server
+    }
+    handle /web-app-manifest-512x512.png {
+        root * /srv/public
+        file_server
+    }
+
+    # Frontend (default)
+    reverse_proxy frontend:3000
 
     # Logging
     log {

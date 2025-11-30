@@ -11,6 +11,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+      - ../frontend/public:/srv/public:ro
     networks:
       - chainlens-network
     depends_on:
