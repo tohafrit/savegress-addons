@@ -17,9 +17,8 @@ func NewFHIRConverter() *FHIRConverter {
 
 // MeasurementToObservation converts an IEEE 11073 measurement to a FHIR Observation
 func (c *FHIRConverter) MeasurementToObservation(m *Measurement, patientRef string) *models.Observation {
-	obs := &models.Observation{
-		ResourceType: models.ResourceTypeObservation,
-	}
+	obs := &models.Observation{}
+	obs.ResourceType = models.ResourceTypeObservation
 
 	// Set status
 	switch m.Status {
@@ -49,7 +48,7 @@ func (c *FHIRConverter) MeasurementToObservation(m *Measurement, patientRef stri
 
 	// Set code from nomenclature
 	info := NomenclatureRegistry[m.Code]
-	obs.Code = models.CodeableConcept{
+	obs.Code = &models.CodeableConcept{
 		Coding: []models.Coding{
 			{
 				System:  "urn:iso:std:iso:11073:10101",
@@ -78,7 +77,8 @@ func (c *FHIRConverter) MeasurementToObservation(m *Measurement, patientRef stri
 	}
 
 	// Set effective time
-	obs.EffectiveDateTime = m.Timestamp.Format(time.RFC3339)
+	ts := m.Timestamp
+	obs.EffectiveDateTime = &ts
 
 	// Set value
 	unitSymbol := UnitRegistry[m.Unit]
@@ -113,9 +113,9 @@ func (c *FHIRConverter) MeasurementToObservation(m *Measurement, patientRef stri
 // DeviceToFHIRDevice converts IEEE 11073 device config to FHIR Device
 func (c *FHIRConverter) DeviceToFHIRDevice(config *DeviceConfiguration) *models.Device {
 	device := &models.Device{
-		ResourceType: models.ResourceTypeDevice,
-		Status:       "active",
+		Status: "active",
 	}
+	device.ResourceType = models.ResourceTypeDevice
 
 	// Set identifier
 	device.Identifier = append(device.Identifier, models.Identifier{
@@ -145,7 +145,7 @@ func (c *FHIRConverter) DeviceToFHIRDevice(config *DeviceConfiguration) *models.
 
 	// Add specialization for IEEE 11073
 	device.Specialization = append(device.Specialization, models.DeviceSpecialization{
-		SystemType: models.CodeableConcept{
+		SystemType: &models.CodeableConcept{
 			Coding: []models.Coding{
 				{
 					System: "urn:iso:std:iso:11073:10101",
@@ -173,9 +173,9 @@ func (c *FHIRConverter) DeviceToFHIRDevice(config *DeviceConfiguration) *models.
 // AlertToDetectedIssue converts IEEE 11073 alert to FHIR DetectedIssue
 func (c *FHIRConverter) AlertToDetectedIssue(alert *Alert, patientRef string) *models.DetectedIssue {
 	issue := &models.DetectedIssue{
-		ResourceType: models.ResourceTypeDetectedIssue,
-		Status:       "final",
+		Status: "final",
 	}
+	issue.ResourceType = models.ResourceTypeDetectedIssue
 
 	// Set severity
 	switch alert.Priority {
@@ -205,7 +205,8 @@ func (c *FHIRConverter) AlertToDetectedIssue(alert *Alert, patientRef string) *m
 	}
 
 	// Set identified time
-	issue.IdentifiedDateTime = alert.Timestamp.Format(time.RFC3339)
+	alertTime := alert.Timestamp
+	issue.IdentifiedDateTime = &alertTime
 
 	// Set detail
 	issue.Detail = alert.Message
@@ -311,12 +312,12 @@ func (c *FHIRConverter) mapToLOINC(code NomenclatureCode) string {
 // CreateVitalSignsPanel creates a FHIR vital signs panel observation
 func (c *FHIRConverter) CreateVitalSignsPanel(measurements []Measurement, patientRef string) *models.Observation {
 	panel := &models.Observation{
-		ResourceType: models.ResourceTypeObservation,
-		Status:       "final",
+		Status: "final",
 	}
+	panel.ResourceType = models.ResourceTypeObservation
 
 	// Set code for vital signs panel
-	panel.Code = models.CodeableConcept{
+	panel.Code = &models.CodeableConcept{
 		Coding: []models.Coding{
 			{
 				System:  "http://loinc.org",
@@ -349,7 +350,7 @@ func (c *FHIRConverter) CreateVitalSignsPanel(measurements []Measurement, patien
 		}
 	}
 	if !earliest.IsZero() {
-		panel.EffectiveDateTime = earliest.Format(time.RFC3339)
+		panel.EffectiveDateTime = &earliest
 	}
 
 	// Add has-member references for each measurement
@@ -385,12 +386,12 @@ func (c *FHIRConverter) CreateVitalSignsPanel(measurements []Measurement, patien
 // BloodPressureObservation creates a FHIR blood pressure observation from systolic and diastolic measurements
 func (c *FHIRConverter) BloodPressureObservation(systolic, diastolic, mean *Measurement, patientRef string) *models.Observation {
 	obs := &models.Observation{
-		ResourceType: models.ResourceTypeObservation,
-		Status:       "final",
+		Status: "final",
 	}
+	obs.ResourceType = models.ResourceTypeObservation
 
 	// Set code
-	obs.Code = models.CodeableConcept{
+	obs.Code = &models.CodeableConcept{
 		Coding: []models.Coding{
 			{
 				System:  "http://loinc.org",
@@ -422,7 +423,8 @@ func (c *FHIRConverter) BloodPressureObservation(systolic, diastolic, mean *Meas
 
 	// Set effective time
 	if systolic != nil {
-		obs.EffectiveDateTime = systolic.Timestamp.Format(time.RFC3339)
+		ts := systolic.Timestamp
+		obs.EffectiveDateTime = &ts
 	}
 
 	// Add systolic component

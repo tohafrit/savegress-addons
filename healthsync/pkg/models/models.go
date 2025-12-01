@@ -21,6 +21,10 @@ const (
 	ResourceTypeImmunization     ResourceType = "Immunization"
 	ResourceTypeAllergyIntolerance ResourceType = "AllergyIntolerance"
 	ResourceTypeDocumentReference ResourceType = "DocumentReference"
+	ResourceTypeDevice           ResourceType = "Device"
+	ResourceTypeBundle           ResourceType = "Bundle"
+	ResourceTypeDetectedIssue    ResourceType = "DetectedIssue"
+	ResourceTypeServiceRequest   ResourceType = "ServiceRequest"
 )
 
 // FHIRResource represents a base FHIR resource
@@ -178,8 +182,23 @@ type Observation struct {
 	ValueString     string           `json:"valueString,omitempty"`
 	ValueBoolean    *bool            `json:"valueBoolean,omitempty"`
 	ValueCodeableConcept *CodeableConcept `json:"valueCodeableConcept,omitempty"`
+	ValueDateTime   string           `json:"valueDateTime,omitempty"`
+	ValueTime       string           `json:"valueTime,omitempty"`
 	Interpretation  []CodeableConcept `json:"interpretation,omitempty"`
 	Note            []Annotation     `json:"note,omitempty"`
+	ReferenceRange  []ObservationReferenceRange `json:"referenceRange,omitempty"`
+	Device          *Reference       `json:"device,omitempty"`
+	HasMember       []Reference      `json:"hasMember,omitempty"`
+	Component       []ObservationComponent `json:"component,omitempty"`
+}
+
+// ObservationComponent represents a component of an observation
+type ObservationComponent struct {
+	Code            CodeableConcept  `json:"code"`
+	ValueQuantity   *Quantity        `json:"valueQuantity,omitempty"`
+	ValueString     string           `json:"valueString,omitempty"`
+	ValueCodeableConcept *CodeableConcept `json:"valueCodeableConcept,omitempty"`
+	Interpretation  []CodeableConcept `json:"interpretation,omitempty"`
 	ReferenceRange  []ObservationReferenceRange `json:"referenceRange,omitempty"`
 }
 
@@ -230,6 +249,14 @@ type Encounter struct {
 	ReasonCode       []CodeableConcept `json:"reasonCode,omitempty"`
 	Diagnosis        []EncounterDiagnosis `json:"diagnosis,omitempty"`
 	ServiceProvider  *Reference        `json:"serviceProvider,omitempty"`
+	Location         []EncounterLocation `json:"location,omitempty"`
+}
+
+// EncounterLocation represents a location in an encounter
+type EncounterLocation struct {
+	Location *Reference `json:"location"`
+	Status   string     `json:"status,omitempty"`
+	Period   *Period    `json:"period,omitempty"`
 }
 
 // EncounterParticipant represents a participant in an encounter
@@ -408,4 +435,213 @@ type AccessRequest struct {
 	ApprovedAt    *time.Time `json:"approved_at,omitempty"`
 	ApprovedBy    string    `json:"approved_by,omitempty"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
+// Device represents a FHIR Device resource
+type Device struct {
+	FHIRResource
+	Status           string            `json:"status,omitempty"`
+	StatusReason     []CodeableConcept `json:"statusReason,omitempty"`
+	DistinctIdentifier string          `json:"distinctIdentifier,omitempty"`
+	Manufacturer     string            `json:"manufacturer,omitempty"`
+	ManufactureDate  *time.Time        `json:"manufactureDate,omitempty"`
+	ExpirationDate   *time.Time        `json:"expirationDate,omitempty"`
+	LotNumber        string            `json:"lotNumber,omitempty"`
+	SerialNumber     string            `json:"serialNumber,omitempty"`
+	DeviceName       []DeviceName      `json:"deviceName,omitempty"`
+	ModelNumber      string            `json:"modelNumber,omitempty"`
+	PartNumber       string            `json:"partNumber,omitempty"`
+	Type             *CodeableConcept  `json:"type,omitempty"`
+	Specialization   []DeviceSpecialization `json:"specialization,omitempty"`
+	Version          []DeviceVersion   `json:"version,omitempty"`
+	Patient          *Reference        `json:"patient,omitempty"`
+	Owner            *Reference        `json:"owner,omitempty"`
+	Contact          []ContactPoint    `json:"contact,omitempty"`
+	Location         *Reference        `json:"location,omitempty"`
+	Url              string            `json:"url,omitempty"`
+	Note             []Annotation      `json:"note,omitempty"`
+	Safety           []CodeableConcept `json:"safety,omitempty"`
+	Parent           *Reference        `json:"parent,omitempty"`
+}
+
+// DeviceName represents a name for the device
+type DeviceName struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// DeviceSpecialization represents device specialization
+type DeviceSpecialization struct {
+	SystemType *CodeableConcept `json:"systemType"`
+	Version    string           `json:"version,omitempty"`
+}
+
+// DeviceVersion represents device version information
+type DeviceVersion struct {
+	Type      *CodeableConcept `json:"type,omitempty"`
+	Component *Identifier      `json:"component,omitempty"`
+	Value     string           `json:"value"`
+}
+
+// Bundle represents a FHIR Bundle resource
+type Bundle struct {
+	ResourceType ResourceType  `json:"resourceType"`
+	ID           string        `json:"id,omitempty"`
+	Meta         *ResourceMeta `json:"meta,omitempty"`
+	Type         string        `json:"type"`
+	Timestamp    *time.Time    `json:"timestamp,omitempty"`
+	Total        int           `json:"total,omitempty"`
+	Link         []BundleLink  `json:"link,omitempty"`
+	Entry        []BundleEntry `json:"entry,omitempty"`
+}
+
+// BundleLink represents a link in a bundle
+type BundleLink struct {
+	Relation string `json:"relation"`
+	URL      string `json:"url"`
+}
+
+// BundleEntry represents an entry in a bundle
+type BundleEntry struct {
+	FullURL  string        `json:"fullUrl,omitempty"`
+	Resource interface{}   `json:"resource,omitempty"`
+	Search   *BundleSearch `json:"search,omitempty"`
+	Request  *BundleRequest `json:"request,omitempty"`
+	Response *BundleResponse `json:"response,omitempty"`
+}
+
+// BundleSearch represents search information in a bundle entry
+type BundleSearch struct {
+	Mode  string  `json:"mode,omitempty"`
+	Score float64 `json:"score,omitempty"`
+}
+
+// BundleRequest represents a request in a bundle entry
+type BundleRequest struct {
+	Method      string `json:"method"`
+	URL         string `json:"url"`
+	IfNoneMatch string `json:"ifNoneMatch,omitempty"`
+	IfMatch     string `json:"ifMatch,omitempty"`
+}
+
+// BundleResponse represents a response in a bundle entry
+type BundleResponse struct {
+	Status       string     `json:"status"`
+	Location     string     `json:"location,omitempty"`
+	Etag         string     `json:"etag,omitempty"`
+	LastModified *time.Time `json:"lastModified,omitempty"`
+}
+
+// DetectedIssue represents a FHIR DetectedIssue resource
+type DetectedIssue struct {
+	FHIRResource
+	Status         string            `json:"status"`
+	Code           *CodeableConcept  `json:"code,omitempty"`
+	Severity       string            `json:"severity,omitempty"`
+	Patient        *Reference        `json:"patient,omitempty"`
+	IdentifiedDateTime *time.Time    `json:"identifiedDateTime,omitempty"`
+	Author         *Reference        `json:"author,omitempty"`
+	Implicated     []Reference       `json:"implicated,omitempty"`
+	Evidence       []DetectedIssueEvidence `json:"evidence,omitempty"`
+	Detail         string            `json:"detail,omitempty"`
+	Reference      string            `json:"reference,omitempty"`
+	Mitigation     []DetectedIssueMitigation `json:"mitigation,omitempty"`
+}
+
+// DetectedIssueEvidence represents evidence for a detected issue
+type DetectedIssueEvidence struct {
+	Code   []CodeableConcept `json:"code,omitempty"`
+	Detail []Reference       `json:"detail,omitempty"`
+}
+
+// DetectedIssueMitigation represents mitigation for a detected issue
+type DetectedIssueMitigation struct {
+	Action *CodeableConcept `json:"action"`
+	Date   *time.Time       `json:"date,omitempty"`
+	Author *Reference       `json:"author,omitempty"`
+}
+
+// DiagnosticReport represents a FHIR DiagnosticReport resource
+type DiagnosticReport struct {
+	FHIRResource
+	Status          string            `json:"status"`
+	Category        []CodeableConcept `json:"category,omitempty"`
+	Code            *CodeableConcept  `json:"code"`
+	Subject         *Reference        `json:"subject,omitempty"`
+	Encounter       *Reference        `json:"encounter,omitempty"`
+	EffectiveDateTime *time.Time      `json:"effectiveDateTime,omitempty"`
+	Issued          *time.Time        `json:"issued,omitempty"`
+	Performer       []Reference       `json:"performer,omitempty"`
+	ResultsInterpreter []Reference    `json:"resultsInterpreter,omitempty"`
+	Result          []Reference       `json:"result,omitempty"`
+	Conclusion      string            `json:"conclusion,omitempty"`
+	ConclusionCode  []CodeableConcept `json:"conclusionCode,omitempty"`
+}
+
+// ServiceRequest represents a FHIR ServiceRequest resource
+type ServiceRequest struct {
+	FHIRResource
+	Status          string            `json:"status"`
+	Intent          string            `json:"intent"`
+	Category        []CodeableConcept `json:"category,omitempty"`
+	Priority        string            `json:"priority,omitempty"`
+	Code            *CodeableConcept  `json:"code,omitempty"`
+	Subject         *Reference        `json:"subject"`
+	Encounter       *Reference        `json:"encounter,omitempty"`
+	OccurrenceDateTime *time.Time     `json:"occurrenceDateTime,omitempty"`
+	AuthoredOn      *time.Time        `json:"authoredOn,omitempty"`
+	Requester       *Reference        `json:"requester,omitempty"`
+	Performer       []Reference       `json:"performer,omitempty"`
+	ReasonCode      []CodeableConcept `json:"reasonCode,omitempty"`
+	Note            []Annotation      `json:"note,omitempty"`
+}
+
+// Condition represents a FHIR Condition resource
+type Condition struct {
+	FHIRResource
+	ClinicalStatus    *CodeableConcept  `json:"clinicalStatus,omitempty"`
+	VerificationStatus *CodeableConcept `json:"verificationStatus,omitempty"`
+	Category          []CodeableConcept `json:"category,omitempty"`
+	Severity          *CodeableConcept  `json:"severity,omitempty"`
+	Code              *CodeableConcept  `json:"code,omitempty"`
+	BodySite          []CodeableConcept `json:"bodySite,omitempty"`
+	Subject           *Reference        `json:"subject"`
+	Encounter         *Reference        `json:"encounter,omitempty"`
+	OnsetDateTime     *time.Time        `json:"onsetDateTime,omitempty"`
+	AbatementDateTime *time.Time        `json:"abatementDateTime,omitempty"`
+	RecordedDate      *time.Time        `json:"recordedDate,omitempty"`
+	Recorder          *Reference        `json:"recorder,omitempty"`
+	Asserter          *Reference        `json:"asserter,omitempty"`
+	Note              []Annotation      `json:"note,omitempty"`
+}
+
+// AllergyIntolerance represents a FHIR AllergyIntolerance resource
+type AllergyIntolerance struct {
+	FHIRResource
+	ClinicalStatus    *CodeableConcept  `json:"clinicalStatus,omitempty"`
+	VerificationStatus *CodeableConcept `json:"verificationStatus,omitempty"`
+	Type              string            `json:"type,omitempty"`
+	Category          []string          `json:"category,omitempty"`
+	Criticality       string            `json:"criticality,omitempty"`
+	Code              *CodeableConcept  `json:"code,omitempty"`
+	Patient           *Reference        `json:"patient"`
+	Encounter         *Reference        `json:"encounter,omitempty"`
+	OnsetDateTime     *time.Time        `json:"onsetDateTime,omitempty"`
+	RecordedDate      *time.Time        `json:"recordedDate,omitempty"`
+	Recorder          *Reference        `json:"recorder,omitempty"`
+	Asserter          *Reference        `json:"asserter,omitempty"`
+	LastOccurrence    *time.Time        `json:"lastOccurrence,omitempty"`
+	Note              []Annotation      `json:"note,omitempty"`
+	Reaction          []AllergyReaction `json:"reaction,omitempty"`
+}
+
+// AllergyReaction represents a reaction to an allergen
+type AllergyReaction struct {
+	Substance     *CodeableConcept  `json:"substance,omitempty"`
+	Manifestation []CodeableConcept `json:"manifestation"`
+	Description   string            `json:"description,omitempty"`
+	Onset         *time.Time        `json:"onset,omitempty"`
+	Severity      string            `json:"severity,omitempty"`
+	ExposureRoute *CodeableConcept  `json:"exposureRoute,omitempty"`
+	Note          []Annotation      `json:"note,omitempty"`
 }

@@ -17,9 +17,8 @@ func NewConverter() *Converter {
 
 // HL7ToFHIRPatient converts HL7 PID segment to FHIR Patient
 func (c *Converter) HL7ToFHIRPatient(pid *PID) *models.Patient {
-	patient := &models.Patient{
-		ResourceType: models.ResourceTypePatient,
-	}
+	patient := &models.Patient{}
+	patient.ResourceType = models.ResourceTypePatient
 
 	// Set identifiers
 	for _, id := range pid.PatientIdentifierList {
@@ -134,7 +133,8 @@ func (c *Converter) HL7ToFHIRPatient(pid *PID) *models.Patient {
 		deceased := true
 		patient.DeceasedBoolean = &deceased
 		if pid.PatientDeathDateTime != nil {
-			patient.DeceasedDateTime = pid.PatientDeathDateTime.Format(time.RFC3339)
+			dt := *pid.PatientDeathDateTime
+			patient.DeceasedDateTime = &dt
 		}
 	}
 
@@ -240,9 +240,8 @@ func (c *Converter) FHIRToHL7Patient(patient *models.Patient) *PID {
 
 // HL7ToFHIREncounter converts HL7 PV1 segment to FHIR Encounter
 func (c *Converter) HL7ToFHIREncounter(pv1 *PV1, patientRef string) *models.Encounter {
-	encounter := &models.Encounter{
-		ResourceType: models.ResourceTypeEncounter,
-	}
+	encounter := &models.Encounter{}
+	encounter.ResourceType = models.ResourceTypeEncounter
 
 	// Set status based on patient class and discharge
 	if pv1.DischargeDateTime != nil {
@@ -252,7 +251,7 @@ func (c *Converter) HL7ToFHIREncounter(pv1 *PV1, patientRef string) *models.Enco
 	}
 
 	// Set class
-	encounter.Class = models.Coding{
+	encounter.Class = &models.Coding{
 		System: "http://terminology.hl7.org/CodeSystem/v3-ActCode",
 		Code:   c.mapPatientClass(pv1.PatientClass),
 	}
@@ -265,18 +264,18 @@ func (c *Converter) HL7ToFHIREncounter(pv1 *PV1, patientRef string) *models.Enco
 	// Set period
 	encounter.Period = &models.Period{}
 	if !pv1.AdmitDateTime.IsZero() {
-		start := pv1.AdmitDateTime.Format(time.RFC3339)
-		encounter.Period.Start = start
+		start := pv1.AdmitDateTime
+		encounter.Period.Start = &start
 	}
 	if pv1.DischargeDateTime != nil {
-		end := pv1.DischargeDateTime.Format(time.RFC3339)
-		encounter.Period.End = end
+		end := *pv1.DischargeDateTime
+		encounter.Period.End = &end
 	}
 
 	// Set location
 	if pv1.AssignedPatientLoc.PointOfCare != "" {
 		encounter.Location = append(encounter.Location, models.EncounterLocation{
-			Location: models.Reference{
+			Location: &models.Reference{
 				Display: fmt.Sprintf("%s-%s-%s",
 					pv1.AssignedPatientLoc.PointOfCare,
 					pv1.AssignedPatientLoc.Room,
@@ -331,9 +330,8 @@ func (c *Converter) HL7ToFHIREncounter(pv1 *PV1, patientRef string) *models.Enco
 
 // HL7ToFHIRObservation converts HL7 OBX segment to FHIR Observation
 func (c *Converter) HL7ToFHIRObservation(obx *OBX, patientRef, encounterRef string) *models.Observation {
-	obs := &models.Observation{
-		ResourceType: models.ResourceTypeObservation,
-	}
+	obs := &models.Observation{}
+	obs.ResourceType = models.ResourceTypeObservation
 
 	// Set status
 	switch obx.ObservationResultStatus {
@@ -350,7 +348,7 @@ func (c *Converter) HL7ToFHIRObservation(obx *OBX, patientRef, encounterRef stri
 	}
 
 	// Set code
-	obs.Code = models.CodeableConcept{
+	obs.Code = &models.CodeableConcept{
 		Coding: []models.Coding{
 			{
 				Code:    obx.ObservationIdentifier.Identifier,
@@ -374,7 +372,8 @@ func (c *Converter) HL7ToFHIRObservation(obx *OBX, patientRef, encounterRef stri
 
 	// Set effective date
 	if !obx.DateTimeOfObservation.IsZero() {
-		obs.EffectiveDateTime = obx.DateTimeOfObservation.Format(time.RFC3339)
+		t := obx.DateTimeOfObservation
+		obs.EffectiveDateTime = &t
 	}
 
 	// Set value based on type
@@ -513,9 +512,8 @@ func (c *Converter) parseFloat(s string) float64 {
 
 // HL7ToFHIRDiagnosticReport converts HL7 OBR+OBXs to FHIR DiagnosticReport
 func (c *Converter) HL7ToFHIRDiagnosticReport(obr *OBR, observations []*OBX, patientRef string) *models.DiagnosticReport {
-	report := &models.DiagnosticReport{
-		ResourceType: models.ResourceTypeDiagnosticReport,
-	}
+	report := &models.DiagnosticReport{}
+	report.ResourceType = models.ResourceTypeDiagnosticReport
 
 	// Set status
 	switch obr.ResultStatus {
@@ -532,7 +530,7 @@ func (c *Converter) HL7ToFHIRDiagnosticReport(obr *OBR, observations []*OBX, pat
 	}
 
 	// Set code
-	report.Code = models.CodeableConcept{
+	report.Code = &models.CodeableConcept{
 		Coding: []models.Coding{
 			{
 				Code:    obr.UniversalServiceID.Identifier,
@@ -549,12 +547,14 @@ func (c *Converter) HL7ToFHIRDiagnosticReport(obr *OBR, observations []*OBX, pat
 
 	// Set effective date
 	if !obr.ObservationDateTime.IsZero() {
-		report.EffectiveDateTime = obr.ObservationDateTime.Format(time.RFC3339)
+		t := obr.ObservationDateTime
+		report.EffectiveDateTime = &t
 	}
 
 	// Set issued date
 	if !obr.ObservationDateTime.IsZero() {
-		report.Issued = obr.ObservationDateTime.Format(time.RFC3339)
+		t := obr.ObservationDateTime
+		report.Issued = &t
 	}
 
 	// Set identifiers
@@ -584,9 +584,8 @@ func (c *Converter) HL7ToFHIRDiagnosticReport(obr *OBR, observations []*OBX, pat
 
 // HL7ToFHIRServiceRequest converts HL7 ORC+OBR to FHIR ServiceRequest
 func (c *Converter) HL7ToFHIRServiceRequest(orc *ORC, obr *OBR, patientRef string) *models.ServiceRequest {
-	sr := &models.ServiceRequest{
-		ResourceType: models.ResourceTypeServiceRequest,
-	}
+	sr := &models.ServiceRequest{}
+	sr.ResourceType = models.ResourceTypeServiceRequest
 
 	// Set status
 	switch orc.OrderStatus {
@@ -628,7 +627,7 @@ func (c *Converter) HL7ToFHIRServiceRequest(orc *ORC, obr *OBR, patientRef strin
 	}
 
 	// Set subject
-	sr.Subject = models.Reference{
+	sr.Subject = &models.Reference{
 		Reference: patientRef,
 	}
 
@@ -641,7 +640,8 @@ func (c *Converter) HL7ToFHIRServiceRequest(orc *ORC, obr *OBR, patientRef strin
 
 	// Set authored on
 	if !orc.DateTimeOfTransaction.IsZero() {
-		sr.AuthoredOn = orc.DateTimeOfTransaction.Format(time.RFC3339)
+		t := orc.DateTimeOfTransaction
+		sr.AuthoredOn = &t
 	}
 
 	// Set priority
@@ -683,9 +683,8 @@ func (c *Converter) HL7ToFHIRServiceRequest(orc *ORC, obr *OBR, patientRef strin
 
 // HL7ToFHIRCondition converts HL7 DG1 segment to FHIR Condition
 func (c *Converter) HL7ToFHIRCondition(dg1 *DG1, patientRef, encounterRef string) *models.Condition {
-	cond := &models.Condition{
-		ResourceType: models.ResourceTypeCondition,
-	}
+	cond := &models.Condition{}
+	cond.ResourceType = models.ResourceTypeCondition
 
 	// Set clinical status
 	cond.ClinicalStatus = &models.CodeableConcept{
@@ -743,7 +742,7 @@ func (c *Converter) HL7ToFHIRCondition(dg1 *DG1, patientRef, encounterRef string
 	}
 
 	// Set subject
-	cond.Subject = models.Reference{
+	cond.Subject = &models.Reference{
 		Reference: patientRef,
 	}
 
@@ -756,7 +755,8 @@ func (c *Converter) HL7ToFHIRCondition(dg1 *DG1, patientRef, encounterRef string
 
 	// Set recorded date
 	if !dg1.DiagnosisDateTime.IsZero() {
-		cond.RecordedDate = dg1.DiagnosisDateTime.Format(time.RFC3339)
+		t := dg1.DiagnosisDateTime
+		cond.RecordedDate = &t
 	}
 
 	// Set asserter
@@ -771,9 +771,8 @@ func (c *Converter) HL7ToFHIRCondition(dg1 *DG1, patientRef, encounterRef string
 
 // HL7ToFHIRAllergyIntolerance converts HL7 AL1 segment to FHIR AllergyIntolerance
 func (c *Converter) HL7ToFHIRAllergyIntolerance(al1 *AL1, patientRef string) *models.AllergyIntolerance {
-	allergy := &models.AllergyIntolerance{
-		ResourceType: models.ResourceTypeAllergyIntolerance,
-	}
+	allergy := &models.AllergyIntolerance{}
+	allergy.ResourceType = models.ResourceTypeAllergyIntolerance
 
 	// Set clinical status
 	allergy.ClinicalStatus = &models.CodeableConcept{
@@ -832,13 +831,14 @@ func (c *Converter) HL7ToFHIRAllergyIntolerance(al1 *AL1, patientRef string) *mo
 	}
 
 	// Set patient
-	allergy.Patient = models.Reference{
+	allergy.Patient = &models.Reference{
 		Reference: patientRef,
 	}
 
 	// Set recorded date
 	if al1.IdentificationDate != nil {
-		allergy.RecordedDate = al1.IdentificationDate.Format(time.RFC3339)
+		t := *al1.IdentificationDate
+		allergy.RecordedDate = &t
 	}
 
 	// Set reaction
